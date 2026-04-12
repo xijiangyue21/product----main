@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets (never commit real keys)
+.env
+.env.local
+.env.*.local
+.env.production
+*.pem
+*.key
+
+# Keep only the template tracked
+!.env.example
+
+# Build output
+frontend/dist/
+**/dist/
+
+# Logs and OS
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local scratch / personal test scripts with credentials
+test-login.local.js
+
+# Vite
+frontend/.vite/
+frontend/vite.config.ts.timestamp-*.mjs
