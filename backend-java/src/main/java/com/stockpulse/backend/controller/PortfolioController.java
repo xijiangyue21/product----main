@@ -1,15 +1,10 @@
 package com.stockpulse.backend.controller;
 
 import com.stockpulse.backend.api.ApiResponse;
-import com.stockpulse.backend.entity.PortfolioHoldingEntity;
-import com.stockpulse.backend.exception.ApiException;
-import com.stockpulse.backend.repository.PortfolioHoldingRepository;
 import com.stockpulse.backend.security.AuthenticatedUser;
-import com.stockpulse.backend.service.EntityResponseMapper;
-import jakarta.transaction.Transactional;
+import com.stockpulse.backend.service.PortfolioService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -28,17 +23,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/portfolio")
 public class PortfolioController {
 
-    private final PortfolioHoldingRepository repository;
-    private final EntityResponseMapper mapper;
+    private final PortfolioService portfolioService;
 
-    public PortfolioController(PortfolioHoldingRepository repository, EntityResponseMapper mapper) {
-        this.repository = repository;
-        this.mapper = mapper;
+    public PortfolioController(PortfolioService portfolioService) {
+        this.portfolioService = portfolioService;
     }
 
     @GetMapping
     public ApiResponse<List<Map<String, Object>>> list(@AuthenticationPrincipal AuthenticatedUser principal) {
-        return ApiResponse.success(repository.findByUserIdOrderByCreatedAtDesc(principal.id()).stream().map(mapper::holding).toList());
+        return ApiResponse.success(portfolioService.list(principal.id()));
     }
 
     @PostMapping
@@ -47,14 +40,16 @@ public class PortfolioController {
             @AuthenticationPrincipal AuthenticatedUser principal,
             @Valid @RequestBody HoldingRequest request
     ) {
-        PortfolioHoldingEntity entity = new PortfolioHoldingEntity();
-        entity.setUserId(principal.id());
-        entity.setSymbol(request.symbol());
-        entity.setName(request.name());
-        entity.setShares(new BigDecimal(request.shares()));
-        entity.setCostPrice(new BigDecimal(request.costPrice()));
-        entity.setCurrentPrice(new BigDecimal(request.currentPrice() == null || request.currentPrice().isBlank() ? "0" : request.currentPrice()));
-        return ApiResponse.success(mapper.holding(repository.save(entity)));
+        return ApiResponse.success(
+                portfolioService.create(
+                        principal.id(),
+                        request.symbol(),
+                        request.name(),
+                        request.shares(),
+                        request.costPrice(),
+                        request.currentPrice()
+                )
+        );
     }
 
     @PutMapping("/{id}")
@@ -63,27 +58,20 @@ public class PortfolioController {
             @PathVariable String id,
             @RequestBody UpdateHoldingRequest request
     ) {
-        PortfolioHoldingEntity entity = repository.findByIdAndUserId(id, principal.id())
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Holding not found"));
-        if (request.shares() != null) {
-            entity.setShares(new BigDecimal(request.shares()));
-        }
-        if (request.costPrice() != null) {
-            entity.setCostPrice(new BigDecimal(request.costPrice()));
-        }
-        if (request.currentPrice() != null) {
-            entity.setCurrentPrice(new BigDecimal(request.currentPrice()));
-        }
-        return ApiResponse.success(mapper.holding(repository.save(entity)));
+        return ApiResponse.success(
+                portfolioService.update(
+                        principal.id(),
+                        id,
+                        request.shares(),
+                        request.costPrice(),
+                        request.currentPrice()
+                )
+        );
     }
 
     @DeleteMapping("/{id}")
-    @Transactional
     public ApiResponse<Void> delete(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable String id) {
-        if (!repository.existsByIdAndUserId(id, principal.id())) {
-            throw new ApiException(HttpStatus.NOT_FOUND, "Holding not found");
-        }
-        repository.deleteByIdAndUserId(id, principal.id());
+        portfolioService.delete(principal.id(), id);
         return ApiResponse.success(null);
     }
 

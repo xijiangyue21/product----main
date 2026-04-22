@@ -17,17 +17,20 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final EntityResponseMapper mapper;
+    private final RequestValidationService validationService;
 
     public AuthService(
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
-            EntityResponseMapper mapper
+            EntityResponseMapper mapper,
+            RequestValidationService validationService
     ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.mapper = mapper;
+        this.validationService = validationService;
     }
 
     public Map<String, Object> signup(String name, String email, String password) {
@@ -55,11 +58,34 @@ public class AuthService {
         return authPayload(user, "Login successful");
     }
 
+    public Map<String, Object> currentUser(String userId) {
+        return mapper.user(requireUser(userId));
+    }
+
+    public Map<String, Object> updatePreferences(String userId, String theme, Integer refreshRate) {
+        UserEntity user = requireUser(userId);
+        String validatedTheme = validationService.validateTheme(theme);
+
+        if (validatedTheme != null) {
+            user.setTheme(validatedTheme);
+        }
+        if (refreshRate != null) {
+            user.setRefreshRate(refreshRate);
+        }
+
+        return mapper.user(userRepository.save(user));
+    }
+
     private Map<String, Object> authPayload(UserEntity user, String message) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("message", message);
         map.put("token", jwtService.generateToken(user.getId(), user.getEmail()));
         map.put("user", mapper.user(user));
         return map;
+    }
+
+    private UserEntity requireUser(String userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Unauthorized - please log in"));
     }
 }

@@ -1,18 +1,13 @@
 package com.stockpulse.backend.controller;
 
 import com.stockpulse.backend.api.ApiResponse;
-import com.stockpulse.backend.entity.UserEntity;
 import com.stockpulse.backend.exception.ApiException;
-import com.stockpulse.backend.repository.UserRepository;
 import com.stockpulse.backend.security.AuthenticatedUser;
 import com.stockpulse.backend.service.AuthService;
-import com.stockpulse.backend.service.EntityResponseMapper;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -30,13 +25,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
-    private final UserRepository userRepository;
-    private final EntityResponseMapper mapper;
 
-    public AuthController(AuthService authService, UserRepository userRepository, EntityResponseMapper mapper) {
+    public AuthController(AuthService authService) {
         this.authService = authService;
-        this.userRepository = userRepository;
-        this.mapper = mapper;
     }
 
     @PostMapping("/signup")
@@ -55,8 +46,7 @@ public class AuthController {
 
     @GetMapping("/me")
     public ApiResponse<Map<String, Object>> me(@AuthenticationPrincipal AuthenticatedUser principal) {
-        UserEntity user = requireUser(principal.id());
-        return ApiResponse.success(mapper.user(user));
+        return ApiResponse.success(authService.currentUser(principal.id()));
     }
 
     @PutMapping("/preferences")
@@ -64,19 +54,9 @@ public class AuthController {
             @AuthenticationPrincipal AuthenticatedUser principal,
             @Valid @RequestBody UpdatePreferencesRequest request
     ) {
-        UserEntity user = requireUser(principal.id());
-        if (request.theme() != null) {
-            user.setTheme(request.theme());
-        }
-        if (request.refreshRate() != null) {
-            user.setRefreshRate(request.refreshRate());
-        }
-        return ApiResponse.success(mapper.user(userRepository.save(user)));
-    }
-
-    private UserEntity requireUser(String id) {
-        return userRepository.findById(id)
-                .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Unauthorized - please log in"));
+        return ApiResponse.success(
+                authService.updatePreferences(principal.id(), request.theme(), request.refreshRate())
+        );
     }
 
     public record SignupRequest(
@@ -93,6 +73,6 @@ public class AuthController {
 
     public record UpdatePreferencesRequest(
             String theme,
-            @NotNull(message = "Refresh rate is required") @Min(value = 1, message = "Refresh rate must be at least 1") @Max(value = 60, message = "Refresh rate must be at most 60") Integer refreshRate
+            @Max(value = 60, message = "Refresh rate must be at most 60") Integer refreshRate
     ) {}
 }

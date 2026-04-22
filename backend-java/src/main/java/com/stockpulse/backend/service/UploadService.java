@@ -20,6 +20,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 public class UploadService {
 
     private static final int DEFAULT_EXPIRY_SECONDS = 3600;
+    private static final String DEFAULT_FOLDER_PREFIX = "user-content";
 
     private final Optional<S3Presigner> presigner;
     private final UploadRepository uploadRepository;
@@ -57,7 +58,11 @@ public class UploadService {
         String uploadId = UUID.randomUUID().toString();
         long timestamp = System.currentTimeMillis();
         String sanitizedFileName = fileName.replaceAll("[^a-zA-Z0-9.-]", "_");
-        String folderPrefix = property("UPLOAD_FOLDER_PREFIX", "user-content");
+        String folderPrefix = firstNonBlank(
+                environment.getProperty("UPLOAD_FOLDER_PREFIX"),
+                environment.getProperty("S3_FOLDER_PREFIX"),
+                DEFAULT_FOLDER_PREFIX
+        );
         String folderName = property("FOLDER_NAME", "default");
         String documentId = property("DOCUMENT_ID", "default-document");
         String key = folderPrefix + "/" + folderName + "/" + documentId + "/" + timestamp + "-" + sanitizedFileName;
@@ -92,7 +97,7 @@ public class UploadService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Missing required fields");
         }
 
-        UploadEntity entity = new UploadEntity();
+        UploadEntity entity = uploadRepository.findByUploadId(uploadId).orElseGet(UploadEntity::new);
         entity.setUploadId(uploadId);
         entity.setFileName(fileName);
         entity.setFileSize(fileSize);
@@ -139,6 +144,15 @@ public class UploadService {
     private String property(String key, String fallback) {
         String value = environment.getProperty(key);
         return isBlank(value) ? fallback : value;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private boolean isBlank(String value) {

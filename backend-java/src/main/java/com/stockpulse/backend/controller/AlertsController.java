@@ -1,16 +1,10 @@
 package com.stockpulse.backend.controller;
 
 import com.stockpulse.backend.api.ApiResponse;
-import com.stockpulse.backend.entity.AlertEntity;
-import com.stockpulse.backend.exception.ApiException;
-import com.stockpulse.backend.repository.AlertHistoryRepository;
-import com.stockpulse.backend.repository.AlertRepository;
 import com.stockpulse.backend.security.AuthenticatedUser;
-import com.stockpulse.backend.service.EntityResponseMapper;
-import jakarta.transaction.Transactional;
+import com.stockpulse.backend.service.AlertsService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -29,23 +23,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/alerts")
 public class AlertsController {
 
-    private final AlertRepository alertRepository;
-    private final AlertHistoryRepository alertHistoryRepository;
-    private final EntityResponseMapper mapper;
+    private final AlertsService alertsService;
 
-    public AlertsController(
-            AlertRepository alertRepository,
-            AlertHistoryRepository alertHistoryRepository,
-            EntityResponseMapper mapper
-    ) {
-        this.alertRepository = alertRepository;
-        this.alertHistoryRepository = alertHistoryRepository;
-        this.mapper = mapper;
+    public AlertsController(AlertsService alertsService) {
+        this.alertsService = alertsService;
     }
 
     @GetMapping
     public ApiResponse<List<Map<String, Object>>> list(@AuthenticationPrincipal AuthenticatedUser principal) {
-        return ApiResponse.success(alertRepository.findByUserIdOrderByCreatedAtDesc(principal.id()).stream().map(mapper::alert).toList());
+        return ApiResponse.success(alertsService.list(principal.id()));
     }
 
     @PostMapping
@@ -54,16 +40,18 @@ public class AlertsController {
             @AuthenticationPrincipal AuthenticatedUser principal,
             @Valid @RequestBody AlertRequest request
     ) {
-        AlertEntity entity = new AlertEntity();
-        entity.setUserId(principal.id());
-        entity.setSymbol(request.symbol());
-        entity.setStockName(request.stockName());
-        entity.setConditionType(request.conditionType());
-        entity.setConditionValue(new BigDecimal(request.conditionValue()));
-        entity.setNotifyApp(request.notifyApp() == null || request.notifyApp());
-        entity.setNotifySms(Boolean.TRUE.equals(request.notifySms()));
-        entity.setNotifyWechat(Boolean.TRUE.equals(request.notifyWechat()));
-        return ApiResponse.success(mapper.alert(alertRepository.save(entity)));
+        return ApiResponse.success(
+                alertsService.create(
+                        principal.id(),
+                        request.symbol(),
+                        request.stockName(),
+                        request.conditionType(),
+                        request.conditionValue(),
+                        request.notifyApp(),
+                        request.notifySms(),
+                        request.notifyWechat()
+                )
+        );
     }
 
     @PutMapping("/{id}")
@@ -72,32 +60,31 @@ public class AlertsController {
             @PathVariable String id,
             @RequestBody UpdateAlertRequest request
     ) {
-        AlertEntity entity = alertRepository.findByIdAndUserId(id, principal.id())
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Alert not found"));
-        if (request.symbol() != null) entity.setSymbol(request.symbol());
-        if (request.stockName() != null) entity.setStockName(request.stockName());
-        if (request.conditionType() != null) entity.setConditionType(request.conditionType());
-        if (request.conditionValue() != null) entity.setConditionValue(new BigDecimal(request.conditionValue()));
-        if (request.notifyApp() != null) entity.setNotifyApp(request.notifyApp());
-        if (request.notifySms() != null) entity.setNotifySms(request.notifySms());
-        if (request.notifyWechat() != null) entity.setNotifyWechat(request.notifyWechat());
-        if (request.status() != null) entity.setStatus(request.status());
-        return ApiResponse.success(mapper.alert(alertRepository.save(entity)));
+        return ApiResponse.success(
+                alertsService.update(
+                        principal.id(),
+                        id,
+                        request.symbol(),
+                        request.stockName(),
+                        request.conditionType(),
+                        request.conditionValue(),
+                        request.notifyApp(),
+                        request.notifySms(),
+                        request.notifyWechat(),
+                        request.status()
+                )
+        );
     }
 
     @DeleteMapping("/{id}")
-    @Transactional
     public ApiResponse<Void> delete(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable String id) {
-        if (!alertRepository.existsByIdAndUserId(id, principal.id())) {
-            throw new ApiException(HttpStatus.NOT_FOUND, "Alert not found");
-        }
-        alertRepository.deleteByIdAndUserId(id, principal.id());
+        alertsService.delete(principal.id(), id);
         return ApiResponse.success(null);
     }
 
     @GetMapping("/history")
     public ApiResponse<List<Map<String, Object>>> history(@AuthenticationPrincipal AuthenticatedUser principal) {
-        return ApiResponse.success(alertHistoryRepository.findTop50ByUserIdOrderByTriggeredAtDesc(principal.id()).stream().map(mapper::alertHistory).toList());
+        return ApiResponse.success(alertsService.history(principal.id()));
     }
 
     public record AlertRequest(

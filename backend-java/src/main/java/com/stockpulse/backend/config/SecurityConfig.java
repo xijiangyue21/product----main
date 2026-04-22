@@ -2,7 +2,9 @@ package com.stockpulse.backend.config;
 
 import com.stockpulse.backend.security.JwtAuthenticationFilter;
 import com.stockpulse.backend.security.RestAuthenticationEntryPoint;
+import java.util.ArrayList;
 import java.util.List;
+import org.springframework.core.env.Environment;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -35,6 +37,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/auth/login",
                                 "/api/auth/signup",
+                                "/api/market/search",
                                 "/api/upload/presigned-url",
                                 "/api/upload/complete"
                         ).permitAll()
@@ -50,9 +53,25 @@ public class SecurityConfig {
     }
 
     @Bean
-    CorsConfigurationSource corsConfigurationSource() {
+    CorsConfigurationSource corsConfigurationSource(Environment environment) {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("http://localhost:*", "http://127.0.0.1:*"));
+        List<String> allowedOriginPatterns = new ArrayList<>(List.of(
+                "http://localhost:*",
+                "https://localhost:*",
+                "http://127.0.0.1:*",
+                "https://127.0.0.1:*"
+        ));
+        String extraOrigins = environment.getProperty("CORS_ORIGINS", "");
+        if (extraOrigins != null && !extraOrigins.isBlank()) {
+            for (String origin : extraOrigins.split(",")) {
+                String trimmed = origin.trim();
+                if (!trimmed.isEmpty()) {
+                    allowedOriginPatterns.add(trimmed);
+                }
+            }
+        }
+
+        configuration.setAllowedOriginPatterns(allowedOriginPatterns);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);

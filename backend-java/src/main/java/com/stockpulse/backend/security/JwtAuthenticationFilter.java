@@ -7,6 +7,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Optional;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
@@ -41,11 +42,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             Claims claims = jwtService.parse(token);
             String userId = claims.get("userId", String.class);
             String email = claims.get("email", String.class);
+            Optional<com.stockpulse.backend.entity.UserEntity> user = Optional.empty();
+
+            if (userId != null && !userId.isBlank()) {
+                user = userRepository.findById(userId);
+            }
+            if (user.isEmpty() && email != null && !email.isBlank()) {
+                user = userRepository.findByEmail(email);
+            }
 
             if (SecurityContextHolder.getContext().getAuthentication() == null
-                    && email != null
-                    && userRepository.findByEmail(email).isPresent()) {
-                AuthenticatedUser principal = new AuthenticatedUser(userId, email);
+                    && user.isPresent()) {
+                com.stockpulse.backend.entity.UserEntity resolvedUser = user.get();
+                AuthenticatedUser principal = new AuthenticatedUser(resolvedUser.getId(), resolvedUser.getEmail());
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));

@@ -1,5 +1,6 @@
 package com.stockpulse.backend.service;
 
+import com.stockpulse.backend.exception.ApiException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -8,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -21,12 +23,12 @@ public class MarketMockService {
 
     public List<Map<String, Object>> indices() {
         return List.of(
-                index("SH000001", "Shanghai Composite", 3287.45, 1.23),
-                index("SZ399001", "Shenzhen Component", 10542.18, 0.87),
-                index("SZ399006", "ChiNext", 2156.33, -0.34),
-                index("SH000300", "CSI 300", 3891.72, 1.05),
-                index("HK.HSI", "Hang Seng", 19234.56, 2.14),
-                index("NASDAQ", "NASDAQ", 17845.23, -0.56)
+                index("SH000001", "上证指数", 3287.45, 1.23),
+                index("SZ399001", "深证成指", 10542.18, 0.87),
+                index("SZ399006", "创业板指", 2156.33, -0.34),
+                index("SH000300", "沪深300", 3891.72, 1.05),
+                index("HK.HSI", "恒生指数", 19234.56, 2.14),
+                index("NASDAQ", "纳斯达克", 17845.23, -0.56)
         );
     }
 
@@ -43,7 +45,7 @@ public class MarketMockService {
         Map<String, Object> base = stockCatalog().stream()
                 .filter(item -> code.equals(item.get("code")))
                 .findFirst()
-                .orElseThrow();
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Stock not found"));
         double start = Double.parseDouble((String) base.get("price"));
         double open = start * 0.99;
         double current = start * (1 + random(-0.02, 0.03));
@@ -82,13 +84,13 @@ public class MarketMockService {
 
     public List<Map<String, Object>> stockCatalog() {
         return List.of(
-                stock("600519", "600519.SH", "Kweichow Moutai", 1742.50),
-                stock("300750", "300750.SZ", "CATL", 195.60),
-                stock("600036", "600036.SH", "China Merchants Bank", 39.85),
-                stock("002594", "002594.SZ", "BYD", 285.40),
-                stock("688981", "688981.SH", "SMIC", 62.18),
-                stock("601012", "601012.SH", "LONGi", 24.56),
-                stock("300059", "300059.SZ", "East Money", 18.92)
+                stock("600519", "600519.SH", "\u8d35\u5dde\u8305\u53f0", 1742.50),
+                stock("300750", "300750.SZ", "\u5b81\u5fb7\u65f6\u4ee3", 195.60),
+                stock("600036", "600036.SH", "\u62db\u5546\u94f6\u884c", 39.85),
+                stock("002594", "002594.SZ", "\u6bd4\u4e9a\u8fea", 285.40),
+                stock("688981", "688981.SH", "\u4e2d\u82af\u56fd\u9645", 62.18),
+                stock("601012", "601012.SH", "\u9686\u57fa\u7eff\u80fd", 24.56),
+                stock("300059", "300059.SZ", "\u4e1c\u65b9\u8d22\u5bcc", 18.92)
         );
     }
 
@@ -148,7 +150,7 @@ public class MarketMockService {
         Map<String, Object> stock = stockCatalog().stream()
                 .filter(item -> code.equals(item.get("code")))
                 .findFirst()
-                .orElseThrow();
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Stock not found"));
         return Map.of(
                 "symbol", stock.get("symbol"),
                 "name", stock.get("name"),
@@ -275,15 +277,15 @@ public class MarketMockService {
     }
 
     private Map<String, Object> newsItem(String id, String categoryType, String category, String title, String time, String symbol) {
-        return Map.of(
-                "id", id,
-                "categoryType", categoryType,
-                "category", category,
-                "title", title,
-                "time", time,
-                "symbol", symbol,
-                "image", "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=120&h=80&fit=crop"
-        );
+        Map<String, Object> news = new LinkedHashMap<>();
+        news.put("id", id);
+        news.put("categoryType", categoryType);
+        news.put("category", category);
+        news.put("title", title);
+        news.put("time", time);
+        news.put("symbol", symbol);
+        news.put("image", "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=120&h=80&fit=crop");
+        return news;
     }
 
     private List<Map<String, Object>> orderBook(double current, int direction) {

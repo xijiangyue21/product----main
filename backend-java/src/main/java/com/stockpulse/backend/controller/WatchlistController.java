@@ -1,14 +1,8 @@
 package com.stockpulse.backend.controller;
 
 import com.stockpulse.backend.api.ApiResponse;
-import com.stockpulse.backend.entity.WatchlistGroupEntity;
-import com.stockpulse.backend.entity.WatchlistItemEntity;
-import com.stockpulse.backend.exception.ApiException;
-import com.stockpulse.backend.repository.WatchlistGroupRepository;
-import com.stockpulse.backend.repository.WatchlistItemRepository;
 import com.stockpulse.backend.security.AuthenticatedUser;
-import com.stockpulse.backend.service.EntityResponseMapper;
-import jakarta.transaction.Transactional;
+import com.stockpulse.backend.service.WatchlistService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
@@ -28,23 +22,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/watchlist")
 public class WatchlistController {
 
-    private final WatchlistGroupRepository groupRepository;
-    private final WatchlistItemRepository itemRepository;
-    private final EntityResponseMapper mapper;
+    private final WatchlistService watchlistService;
 
-    public WatchlistController(
-            WatchlistGroupRepository groupRepository,
-            WatchlistItemRepository itemRepository,
-            EntityResponseMapper mapper
-    ) {
-        this.groupRepository = groupRepository;
-        this.itemRepository = itemRepository;
-        this.mapper = mapper;
+    public WatchlistController(WatchlistService watchlistService) {
+        this.watchlistService = watchlistService;
     }
 
     @GetMapping("/groups")
     public ApiResponse<List<Map<String, Object>>> groups(@AuthenticationPrincipal AuthenticatedUser principal) {
-        return ApiResponse.success(groupRepository.findByUserIdOrderByCreatedAtAsc(principal.id()).stream().map(mapper::watchlistGroup).toList());
+        return ApiResponse.success(watchlistService.groups(principal.id()));
     }
 
     @PostMapping("/groups")
@@ -53,19 +39,12 @@ public class WatchlistController {
             @AuthenticationPrincipal AuthenticatedUser principal,
             @Valid @RequestBody GroupRequest request
     ) {
-        WatchlistGroupEntity entity = new WatchlistGroupEntity();
-        entity.setUserId(principal.id());
-        entity.setName(request.name());
-        return ApiResponse.success(mapper.watchlistGroup(groupRepository.save(entity)));
+        return ApiResponse.success(watchlistService.createGroup(principal.id(), request.name()));
     }
 
     @DeleteMapping("/groups/{id}")
-    @Transactional
     public ApiResponse<Void> deleteGroup(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable String id) {
-        if (!groupRepository.existsByIdAndUserId(id, principal.id())) {
-            throw new ApiException(HttpStatus.NOT_FOUND, "Group not found");
-        }
-        groupRepository.deleteByIdAndUserId(id, principal.id());
+        watchlistService.deleteGroup(principal.id(), id);
         return ApiResponse.success(null);
     }
 
@@ -74,12 +53,12 @@ public class WatchlistController {
             @AuthenticationPrincipal AuthenticatedUser principal,
             @PathVariable String groupId
     ) {
-        return ApiResponse.success(itemRepository.findByGroupIdAndUserIdOrderByCreatedAtAsc(groupId, principal.id()).stream().map(mapper::watchlistItem).toList());
+        return ApiResponse.success(watchlistService.itemsByGroup(principal.id(), groupId));
     }
 
     @GetMapping("/items")
     public ApiResponse<List<Map<String, Object>>> items(@AuthenticationPrincipal AuthenticatedUser principal) {
-        return ApiResponse.success(itemRepository.findByUserIdOrderByCreatedAtAsc(principal.id()).stream().map(mapper::watchlistItem).toList());
+        return ApiResponse.success(watchlistService.items(principal.id()));
     }
 
     @PostMapping("/items")
@@ -88,21 +67,14 @@ public class WatchlistController {
             @AuthenticationPrincipal AuthenticatedUser principal,
             @Valid @RequestBody ItemRequest request
     ) {
-        WatchlistItemEntity entity = new WatchlistItemEntity();
-        entity.setUserId(principal.id());
-        entity.setGroupId(request.groupId());
-        entity.setSymbol(request.symbol());
-        entity.setName(request.name());
-        return ApiResponse.success(mapper.watchlistItem(itemRepository.save(entity)));
+        return ApiResponse.success(
+                watchlistService.createItem(principal.id(), request.groupId(), request.symbol(), request.name())
+        );
     }
 
     @DeleteMapping("/items/{id}")
-    @Transactional
     public ApiResponse<Void> deleteItem(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable String id) {
-        if (!itemRepository.existsByIdAndUserId(id, principal.id())) {
-            throw new ApiException(HttpStatus.NOT_FOUND, "Item not found");
-        }
-        itemRepository.deleteByIdAndUserId(id, principal.id());
+        watchlistService.deleteItem(principal.id(), id);
         return ApiResponse.success(null);
     }
 

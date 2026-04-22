@@ -1,6 +1,6 @@
 # Spring Boot Backend
 
-This folder contains the Java backend that mirrors the TypeScript API surface used by the React frontend.
+This folder contains the active Java backend for StockPulse.
 
 ## Run on Windows
 
@@ -15,8 +15,6 @@ mvn spring-boot:run
 cd E:\stockwork\product----main\product----main\backend-java
 .\run-backend.ps1
 ```
-
-The script uses the globally installed Maven available on your `Path`.
 
 ## Run Full Stack From Root
 
@@ -41,5 +39,5 @@ The backend reads the same root `.env` values:
 
 ## Notes
 
-- The Java backend currently listens on its own application port configured in `application.yml`.
-- If terminal output still shows garbled characters in runtime logs, that is usually a console encoding issue rather than a source file encoding problem.
+- The backend port is controlled by `application.yml`
+- The frontend now targets this backend directly
