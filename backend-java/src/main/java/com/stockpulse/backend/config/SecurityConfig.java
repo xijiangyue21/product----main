@@ -37,7 +37,15 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/auth/login",
                                 "/api/auth/signup",
+                                "/api/market/indices",
+                                "/api/market/stock-rank",
+                                "/api/market/stocks",
                                 "/api/market/search",
+                                "/api/market/quote/*",
+                                "/api/market/live-quote/*",
+                                "/api/market/fundamentals/*",
+                                "/api/market/history-analysis/*",
+                                "/api/market/ai-context/*",
                                 "/api/upload/presigned-url",
                                 "/api/upload/complete"
                         ).permitAll()

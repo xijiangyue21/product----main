@@ -64,8 +64,9 @@ export default function Signup() {
         return;
       }
       setError(getErrorMessage(data, "注册失败，请重试"));
-    } catch {
-      setError("网络错误，请稍后重试");
+    } catch (error) {
+      console.error("Signup request failed", { apiBaseUrl: API_BASE_URL, error });
+      setError("无法连接后端服务，请确认后端已启动且 API 地址正确");
     } finally {
       setLoading(false);
     }

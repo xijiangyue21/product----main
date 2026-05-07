@@ -1,5 +1,6 @@
 package com.stockpulse.backend.service;
 
+import com.stockpulse.backend.entity.AiAdviceRecordEntity;
 import com.stockpulse.backend.entity.AlertEntity;
 import com.stockpulse.backend.entity.AlertHistoryEntity;
 import com.stockpulse.backend.entity.FeedbackEntity;
@@ -101,6 +102,21 @@ public class EntityResponseMapper {
         map.put("id", entity.getId());
         map.put("userId", entity.getUserId());
         map.put("content", entity.getContent());
+        map.put("createdAt", entity.getCreatedAt());
+        return map;
+    }
+
+    public Map<String, Object> aiAdviceRecord(AiAdviceRecordEntity entity) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("id", entity.getId());
+        map.put("userId", entity.getUserId());
+        map.put("code", entity.getCode());
+        map.put("symbol", entity.getSymbol());
+        map.put("stockName", entity.getStockName());
+        map.put("source", entity.getSource());
+        map.put("advice", entity.getAdvice());
+        map.put("configStatus", entity.getConfigStatus());
+        map.put("disclaimer", entity.getDisclaimer());
         map.put("createdAt", entity.getCreatedAt());
         return map;
     }

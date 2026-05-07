@@ -54,8 +54,9 @@ export default function Login() {
         return;
       }
       setError(getErrorMessage(data, "邮箱或密码错误"));
-    } catch {
-      setError("网络错误，请稍后重试");
+    } catch (error) {
+      console.error("Login request failed", { apiBaseUrl: API_BASE_URL, error });
+      setError("无法连接后端服务，请确认后端已启动且 API 地址正确");
     } finally {
       setLoading(false);
     }

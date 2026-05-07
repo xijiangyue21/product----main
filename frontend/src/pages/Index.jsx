@@ -19,7 +19,12 @@ import AlertsView from "@/components/custom/AlertsView";
 import NewsView from "@/components/custom/NewsView";
 import ProfileView from "@/components/custom/ProfileView";
 import { marketApi } from "@/lib/api";
-import { filterStockOptions } from "@/constants/stocks";
+import {
+  STOCK_SEARCH_DEBOUNCE_MS,
+  createFallbackSearchResults,
+  isStockCodeQuery,
+  mergeSearchResults,
+} from "@/lib/stockSearch";
 
 const NAV_ITEMS = [
   { key: "market", label: "行情", icon: TrendingUp },
@@ -29,33 +34,6 @@ const NAV_ITEMS = [
   { key: "news", label: "资讯", icon: Newspaper },
   { key: "profile", label: "我的", icon: User },
 ];
-
-const SEARCH_DEBOUNCE_MS = 250;
-
-function normalizeSearchResult(item) {
-  return {
-    code: item.code,
-    symbol: item.symbol,
-    name: item.name,
-    price: item.price,
-  };
-}
-
-function mergeSearchResults(primaryResults, fallbackResults) {
-  const mergedResults = [];
-  const seenCodes = new Set();
-
-  for (const item of [...primaryResults, ...fallbackResults]) {
-    if (!item?.code || seenCodes.has(item.code)) {
-      continue;
-    }
-
-    seenCodes.add(item.code);
-    mergedResults.push(normalizeSearchResult(item));
-  }
-
-  return mergedResults;
-}
 
 function SearchBox({
   value,
@@ -67,7 +45,7 @@ function SearchBox({
   onFocus,
   onKeyDown,
   onSelect,
-  placeholder = "搜索代码或股票名称",
+  placeholder = "搜索股票代码",
   className = "",
 }) {
   return (
@@ -114,9 +92,15 @@ function SearchBox({
                         {item.code} · {item.symbol}
                       </div>
                     </div>
-                    <div className="font-mono text-xs text-[var(--app-muted)]">
-                      {item.price}
-                    </div>
+                    {item.price ? (
+                      <div className="font-mono text-xs text-[var(--app-muted)]">
+                        {item.price}
+                      </div>
+                    ) : (
+                      <div className="rounded border border-[var(--app-border)] px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-[var(--app-muted)]">
+                        Local
+                      </div>
+                    )}
                   </button>
                 ))
               ) : (
@@ -154,13 +138,22 @@ export default function Index() {
       return;
     }
 
+    if (!isStockCodeQuery(trimmedQuery)) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchNotice("");
+      return;
+    }
+
     const timer = window.setTimeout(async () => {
       const searchId = latestSearchIdRef.current + 1;
       latestSearchIdRef.current = searchId;
       setSearchLoading(true);
       setSearchNotice("");
 
-      const fallbackResults = filterStockOptions(trimmedQuery);
+      const fallbackResults = createFallbackSearchResults(trimmedQuery);
+      setSearchResults(fallbackResults);
+      setSearchLoading(fallbackResults.length === 0);
 
       try {
         const response = await marketApi.searchStocks(trimmedQuery);
@@ -203,7 +196,7 @@ export default function Index() {
           setSearchLoading(false);
         }
       }
-    }, SEARCH_DEBOUNCE_MS);
+    }, STOCK_SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
   }, [searchQuery]);

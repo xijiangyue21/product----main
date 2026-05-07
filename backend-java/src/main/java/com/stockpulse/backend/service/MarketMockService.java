@@ -16,9 +16,11 @@ import org.springframework.stereotype.Service;
 public class MarketMockService {
 
     private final AliyunMarketApiService aliyunMarketApiService;
+    private final SinaMarketApiService sinaMarketApiService;
 
-    public MarketMockService(AliyunMarketApiService aliyunMarketApiService) {
+    public MarketMockService(AliyunMarketApiService aliyunMarketApiService, SinaMarketApiService sinaMarketApiService) {
         this.aliyunMarketApiService = aliyunMarketApiService;
+        this.sinaMarketApiService = sinaMarketApiService;
     }
 
     public List<Map<String, Object>> indices() {
@@ -38,6 +40,11 @@ public class MarketMockService {
             return liveQuote.get();
         }
 
+        Optional<Map<String, Object>> sinaQuote = sinaMarketApiService.fetchAshareQuote(code, fallbackStock(code));
+        if (sinaQuote.isPresent()) {
+            return sinaQuote.get();
+        }
+
         return mockQuote(code);
     }
 
@@ -45,11 +52,12 @@ public class MarketMockService {
         Map<String, Object> base = stockCatalog().stream()
                 .filter(item -> code.equals(item.get("code")))
                 .findFirst()
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Stock not found"));
+                .orElseGet(() -> fallbackStock(code));
         double start = Double.parseDouble((String) base.get("price"));
         double open = start * 0.99;
         double current = start * (1 + random(-0.02, 0.03));
         Map<String, Object> map = new LinkedHashMap<>();
+        map.put("code", base.get("code"));
         map.put("symbol", base.get("symbol"));
         map.put("name", base.get("name"));
         map.put("price", format(current));
@@ -63,6 +71,8 @@ public class MarketMockService {
         map.put("pb", "2.1");
         map.put("roe", "11.5");
         map.put("revenueGrowth", "+15.2");
+        map.put("source", "mock");
+        map.put("updatedAt", System.currentTimeMillis());
         map.put("orderBook", Map.of(
                 "asks", orderBook(current, 1),
                 "bids", orderBook(current, -1)
@@ -86,11 +96,13 @@ public class MarketMockService {
         return List.of(
                 stock("600519", "600519.SH", "\u8d35\u5dde\u8305\u53f0", 1742.50),
                 stock("300750", "300750.SZ", "\u5b81\u5fb7\u65f6\u4ee3", 195.60),
+                stock("000686", "000686.SZ", "\u4e1c\u5317\u8bc1\u5238", 8.86),
                 stock("600036", "600036.SH", "\u62db\u5546\u94f6\u884c", 39.85),
                 stock("002594", "002594.SZ", "\u6bd4\u4e9a\u8fea", 285.40),
                 stock("688981", "688981.SH", "\u4e2d\u82af\u56fd\u9645", 62.18),
                 stock("601012", "601012.SH", "\u9686\u57fa\u7eff\u80fd", 24.56),
-                stock("300059", "300059.SZ", "\u4e1c\u65b9\u8d22\u5bcc", 18.92)
+                stock("300059", "300059.SZ", "\u4e1c\u65b9\u8d22\u5bcc", 18.92),
+                stock("688699", "688699.SH", "\u660e\u5fae\u7535\u5b50", 43.20, "\u660e\u5fae", "\u663e\u793a\u9a71\u52a8", "\u96c6\u6210\u7535\u8def", "Mingwei")
         );
     }
 
@@ -113,8 +125,17 @@ public class MarketMockService {
 
         if (localMatches.isEmpty() && looksLikeCodeQuery(normalized)) {
             return aliyunMarketApiService.fetchAshareSearchItem(normalized, unknownSearchFallback(normalized))
+                    .map(this::markLiveSearchItem)
                     .map(List::of)
-                    .orElse(List.of());
+                    .or(() -> sinaMarketApiService.fetchAshareSearchItem(normalized, unknownSearchFallback(normalized))
+                            .map(List::of))
+                    .orElseGet(() -> List.of(markFallbackSearchItem(unknownSearchFallback(normalized))));
+        }
+
+        if (!looksLikeCodeQuery(normalized)) {
+            return localMatches.stream()
+                    .map(this::markCatalogSearchItem)
+                    .toList();
         }
 
         return localMatches.stream()
@@ -174,7 +195,7 @@ public class MarketMockService {
                 .get("price"));
         List<Map<String, Object>> points = new ArrayList<>();
         double price = base * 0.85;
-        for (int i = 60; i >= 0; i--) {
+        for (int i = 365; i >= 0; i--) {
             price = price * (1 + random(-0.015, 0.02));
             LocalDate date = LocalDate.now().minusDays(i);
             points.add(Map.of(
@@ -217,32 +238,44 @@ public class MarketMockService {
         );
     }
 
-    private Map<String, Object> stock(String code, String symbol, String name, double price) {
-        return Map.of(
-                "code", code,
-                "symbol", symbol,
-                "name", name,
-                "price", format(price),
-                "changePercent", format(random(-2.5, 6.5))
-        );
+    private Map<String, Object> stock(String code, String symbol, String name, double price, String... aliases) {
+        Map<String, Object> stock = new LinkedHashMap<>();
+        stock.put("code", code);
+        stock.put("symbol", symbol);
+        stock.put("name", name);
+        stock.put("price", format(price));
+        stock.put("changePercent", format(random(-2.5, 6.5)));
+        stock.put("aliases", List.of(aliases));
+        return stock;
     }
 
     private boolean matchesQuery(Map<String, Object> item, String query) {
         String code = String.valueOf(item.get("code")).toLowerCase();
         String symbol = String.valueOf(item.get("symbol")).toLowerCase();
         String name = String.valueOf(item.get("name")).toLowerCase();
-        return code.contains(query) || symbol.contains(query) || name.contains(query);
+        List<?> aliases = (List<?>) item.getOrDefault("aliases", List.of());
+        boolean aliasMatches = aliases.stream()
+                .map(String::valueOf)
+                .map(String::toLowerCase)
+                .anyMatch(alias -> alias.contains(query));
+
+        return code.contains(query) || symbol.contains(query) || name.contains(query) || aliasMatches;
     }
 
     private int matchScore(Map<String, Object> item, String query) {
         String code = String.valueOf(item.get("code")).toLowerCase();
         String symbol = String.valueOf(item.get("symbol")).toLowerCase();
         String name = String.valueOf(item.get("name")).toLowerCase();
+        List<?> aliases = (List<?>) item.getOrDefault("aliases", List.of());
+        boolean aliasStartsWith = aliases.stream()
+                .map(String::valueOf)
+                .map(String::toLowerCase)
+                .anyMatch(alias -> alias.startsWith(query));
 
         if (code.equals(query) || symbol.equals(query) || name.equals(query)) {
             return 0;
         }
-        if (code.startsWith(query) || symbol.startsWith(query) || name.startsWith(query)) {
+        if (code.startsWith(query) || symbol.startsWith(query) || name.startsWith(query) || aliasStartsWith) {
             return 1;
         }
         return 2;
@@ -257,7 +290,31 @@ public class MarketMockService {
     private Map<String, Object> enrichSearchItem(Map<String, Object> item) {
         String code = String.valueOf(item.get("code"));
         return aliyunMarketApiService.fetchAshareSearchItem(code, item)
-                .orElse(item);
+                .map(this::markLiveSearchItem)
+                .or(() -> sinaMarketApiService.fetchAshareSearchItem(code, item))
+                .orElseGet(() -> markFallbackSearchItem(item));
+    }
+
+    private Map<String, Object> markLiveSearchItem(Map<String, Object> item) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        copy.putAll(item);
+        copy.put("source", "live");
+        return copy;
+    }
+
+    private Map<String, Object> markCatalogSearchItem(Map<String, Object> item) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        copy.putAll(item);
+        copy.put("source", "catalog");
+        return copy;
+    }
+
+    private Map<String, Object> markFallbackSearchItem(Map<String, Object> item) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        copy.putAll(item);
+        copy.put("price", null);
+        copy.put("source", "fallback");
+        return copy;
     }
 
     private Map<String, Object> unknownSearchFallback(String query) {

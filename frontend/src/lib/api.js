@@ -26,7 +26,11 @@ export const marketApi = {
   getNews: (category) =>
     apiFetch(`/api/market/news${category ? `?category=${category}` : ""}`),
   getFundamentals: (code) => apiFetch(`/api/market/fundamentals/${code}`),
-  getKLine: (code) => apiFetch(`/api/market/kline/${code}`),
+  getHistoryAnalysis: (code) =>
+    apiFetch(`/api/market/history-analysis/${code}`),
+  getAiSpeculation: (code) =>
+    apiFetch(`/api/market/ai-speculation/${code}`, { method: "POST" }),
+  getAiSpeculationRecords: () => apiFetch("/api/market/ai-speculation/records"),
   getStockRank: () => apiFetch("/api/market/stock-rank"),
 };
 // ============================================
@@ -79,6 +83,7 @@ export const alertsApi = {
       body: JSON.stringify(data),
     }),
   deleteAlert: (id) => apiFetch(`/api/alerts/${id}`, { method: "DELETE" }),
+  checkAlerts: () => apiFetch("/api/alerts/check", { method: "POST" }),
   getHistory: () => apiFetch("/api/alerts/history"),
 };
 // ============================================

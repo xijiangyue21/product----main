@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { BarChart3, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { STOCK_ASSISTANT_URL } from "@/config/constants";
 import { marketApi } from "@/lib/api";
-import { MARKET_AI_INSIGHTS, MARKET_PERIODS } from "@/constants/market";
 import {
   REFRESH_RATE_CHANGE_EVENT,
   getRefreshRateLabel,
@@ -46,6 +46,8 @@ const STOCK_NAME_BY_LABEL = {
   "East Money": "东方财富",
 };
 
+const DEFAULT_STOCK_CODE = "600519";
+
 function getIndexDisplayName(indexItem) {
   return (
     INDEX_NAME_BY_CODE[indexItem.code] ??
@@ -54,65 +56,45 @@ function getIndexDisplayName(indexItem) {
   );
 }
 
+function safeText(value, fallback = "--") {
+  const text = value == null ? "" : String(value).trim();
+
+  if (
+    !text ||
+    text.toLowerCase() === "undefined" ||
+    text.toLowerCase() === "null"
+  ) {
+    return fallback;
+  }
+
+  return text;
+}
+
+function normalizeStockCode(stock) {
+  const text = safeText(stock?.code ?? stock?.symbol, "").toUpperCase();
+  const sixDigitCode = text.match(/\d{6}/);
+
+  return sixDigitCode ? sixDigitCode[0] : text;
+}
+
+function getStockSymbol(stock) {
+  return safeText(stock?.symbol, normalizeStockCode(stock));
+}
+
 function getStockDisplayName(stock) {
   if (!stock) {
     return "";
   }
 
-  return (
-    STOCK_NAME_BY_CODE[stock.code] ??
-    STOCK_NAME_BY_LABEL[stock.name] ??
-    stock.name
-  );
-}
-
-function MiniChart({ points, positive }) {
-  if (points.length < 2) {
-    return null;
-  }
-
-  const prices = points.map((point) => Number.parseFloat(point.close));
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
-  const range = max - min || 1;
-  const width = 300;
-  const height = 80;
-  const polyline = prices
-    .map((price, index) => {
-      const x = (index / (prices.length - 1)) * width;
-      const y = height - ((price - min) / range) * height;
-      return `${x},${y}`;
-    })
-    .join(" ");
-  const fillPoints = `0,${height} ${polyline} ${width},${height}`;
-  const color = positive ? "#16A34A" : "#EF4444";
+  const code = normalizeStockCode(stock);
+  const name = safeText(stock.name, "");
 
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      className="h-full w-full"
-      preserveAspectRatio="none"
-    >
-      <defs>
-        <linearGradient
-          id={`market-grad-${positive}`}
-          x1="0"
-          y1="0"
-          x2="0"
-          y2="1"
-        >
-          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <polyline
-        points={polyline}
-        fill="none"
-        stroke={color}
-        strokeWidth="1.5"
-      />
-      <polygon points={fillPoints} fill={`url(#market-grad-${positive})`} />
-    </svg>
+    STOCK_NAME_BY_CODE[code] ||
+    STOCK_NAME_BY_LABEL[name] ||
+    name ||
+    getStockSymbol(stock) ||
+    code
   );
 }
 
@@ -120,15 +102,21 @@ export default function MarketView({ selectedStock, onSelectStock }) {
   const [indices, setIndices] = useState([]);
   const [stockRank, setStockRank] = useState([]);
   const [quote, setQuote] = useState(null);
-  const [kline, setKline] = useState([]);
-  const [period, setPeriod] = useState(() => MARKET_PERIODS[1] ?? "日线");
-  const [loading, setLoading] = useState(true);
+  const [indicesLoading, setIndicesLoading] = useState(true);
+  const [rankLoading, setRankLoading] = useState(true);
+  const [quoteLoading, setQuoteLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshRate, setRefreshRate] = useState(() => getStoredRefreshRate());
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [rankSource, setRankSource] = useState("");
+  const [historyAnalysis, setHistoryAnalysis] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
   const [time, setTime] = useState(new Date());
   const activeRequestCountRef = useRef(0);
   const latestRequestIdRef = useRef(0);
+  const selectedStockCode =
+    normalizeStockCode({ code: selectedStock }) || DEFAULT_STOCK_CODE;
 
   const fetchData = useCallback(
     async ({ showLoading = false } = {}) => {
@@ -138,55 +126,80 @@ export default function MarketView({ selectedStock, onSelectStock }) {
       setRefreshing(true);
 
       if (showLoading) {
-        setLoading(true);
+        setIndicesLoading(true);
+        setRankLoading(true);
+        setQuoteLoading(true);
       }
 
-      try {
-        const [indicesResponse, quoteResponse, klineResponse, rankResponse] =
-          await Promise.all([
-            marketApi.getIndices(),
-            marketApi.getQuote(selectedStock),
-            marketApi.getKLine(selectedStock),
-            marketApi.getStockRank(),
-          ]);
-
+      const applyIfCurrent = (apply) => {
         if (requestId !== latestRequestIdRef.current) {
-          return;
+          return false;
         }
-
-        if (indicesResponse.success) {
-          setIndices(indicesResponse.data);
-        }
-
-        if (quoteResponse.success) {
-          setQuote(quoteResponse.data);
-        }
-
-        if (klineResponse.success) {
-          setKline(klineResponse.data);
-        }
-
-        if (rankResponse.success) {
-          setStockRank(rankResponse.data);
-        }
-
+        apply();
         setLastUpdatedAt(new Date());
+        return true;
+      };
+
+      const loadIndices = async () => {
+        setIndicesLoading(true);
+        try {
+          const indicesResponse = await marketApi.getIndices();
+          applyIfCurrent(() => {
+            if (indicesResponse.success) {
+              setIndices(indicesResponse.data);
+            }
+          });
+        } finally {
+          if (requestId === latestRequestIdRef.current) {
+            setIndicesLoading(false);
+          }
+        }
+      };
+
+      const loadQuote = async () => {
+        setQuoteLoading(true);
+        try {
+          const quoteResponse = await marketApi.getQuote(selectedStockCode);
+          applyIfCurrent(() => {
+            if (quoteResponse.success) {
+              setQuote(quoteResponse.data);
+            }
+          });
+        } finally {
+          if (requestId === latestRequestIdRef.current) {
+            setQuoteLoading(false);
+          }
+        }
+      };
+
+      const loadRank = async () => {
+        setRankLoading(true);
+        try {
+          const rankResponse = await marketApi.getStockRank();
+          applyIfCurrent(() => {
+            if (rankResponse.success) {
+              setStockRank(rankResponse.data);
+              setRankSource(rankResponse.source ?? "");
+            }
+          });
+        } finally {
+          if (requestId === latestRequestIdRef.current) {
+            setRankLoading(false);
+          }
+        }
+      };
+
+      try {
+        await Promise.allSettled([loadIndices(), loadQuote(), loadRank()]);
       } finally {
         activeRequestCountRef.current -= 1;
-
-        if (
-          showLoading &&
-          requestId === latestRequestIdRef.current
-        ) {
-          setLoading(false);
-        }
 
         if (activeRequestCountRef.current <= 0) {
           setRefreshing(false);
         }
       }
     },
-    [selectedStock],
+    [selectedStockCode],
   );
 
   useEffect(() => {
@@ -220,7 +233,7 @@ export default function MarketView({ selectedStock, onSelectStock }) {
   }, []);
 
   useEffect(() => {
-    if (loading || refreshRate <= 0) {
+    if (refreshRate <= 0) {
       return undefined;
     }
 
@@ -229,12 +242,17 @@ export default function MarketView({ selectedStock, onSelectStock }) {
     }, refreshRate * 1000);
 
     return () => window.clearInterval(timer);
-  }, [fetchData, loading, refreshRate]);
+  }, [fetchData, refreshRate]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setTime(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    setHistoryAnalysis(null);
+    setActionError("");
+  }, [selectedStock]);
 
   const isPositive = (value) => Number.parseFloat(value) >= 0;
   const refreshModeLabel =
@@ -244,6 +262,68 @@ export default function MarketView({ selectedStock, onSelectStock }) {
   const lastUpdatedLabel = lastUpdatedAt
     ? lastUpdatedAt.toLocaleTimeString("zh-CN")
     : "等待首次刷新";
+
+  const quoteSource = quote?.source ?? "";
+  const hasLiveData =
+    quoteSource === "live" ||
+    quoteSource === "sina" ||
+    quoteSource === "alpha_vantage" ||
+    rankSource === "live" ||
+    rankSource === "sina";
+  const dataStatusLabel = refreshing
+    ? "更新中"
+    : hasLiveData
+      ? "实时"
+      : "本地";
+  const quoteStatusLabel =
+    quoteSource === "live" ||
+    quoteSource === "sina" ||
+    quoteSource === "alpha_vantage"
+      ? "实时行情"
+      : "本地行情";
+  const quoteTradeTimeLabel =
+    quote?.tradeDate && quote?.tradeTime
+      ? `${quote.tradeDate} ${quote.tradeTime}`
+      : "";
+  const quoteDisplayName = quote
+    ? getStockDisplayName(quote) || selectedStockCode
+    : "";
+  const quoteSymbol = quote ? getStockSymbol(quote) || selectedStockCode : "";
+
+  const handleHistoryAnalysis = async () => {
+    setHistoryLoading(true);
+    setActionError("");
+
+    try {
+      const response = await marketApi.getHistoryAnalysis(selectedStockCode);
+      if (response.success) {
+        setHistoryAnalysis(response.data);
+      } else {
+        setActionError(response.message || "历史行情分析失败");
+      }
+    } catch {
+      setActionError("历史行情分析失败，请稍后重试");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const openStockAssistant = () => {
+    const assistantUrl = new URL(STOCK_ASSISTANT_URL, window.location.origin);
+    const assistantStockCode = normalizeStockCode(quote) || selectedStockCode;
+    const name = quoteDisplayName;
+    const symbol = quoteSymbol || assistantStockCode;
+
+    assistantUrl.searchParams.set("stock", assistantStockCode);
+    if (name) {
+      assistantUrl.searchParams.set("name", name);
+    }
+    if (symbol) {
+      assistantUrl.searchParams.set("symbol", symbol);
+    }
+
+    window.location.assign(assistantUrl.toString());
+  };
 
   const stats = quote
     ? [
@@ -262,7 +342,7 @@ export default function MarketView({ selectedStock, onSelectStock }) {
     <div className="space-y-4">
       <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-sm">
         <div className="flex items-center gap-6 overflow-x-auto px-4 py-2.5 scrollbar-hide">
-          {loading ? (
+          {indicesLoading && indices.length === 0 ? (
             <span className="text-xs font-mono text-[var(--app-muted)]">
               加载行情数据...
             </span>
@@ -293,7 +373,17 @@ export default function MarketView({ selectedStock, onSelectStock }) {
           )}
 
           <div className="ml-auto flex items-center gap-1.5 whitespace-nowrap">
-            <span className="animate-pulse text-xs text-amber-500">实时</span>
+            <span
+              className={`text-xs ${
+                refreshing
+                  ? "animate-pulse text-amber-500"
+                  : hasLiveData
+                    ? "text-amber-500"
+                    : "text-[var(--app-muted)]"
+              }`}
+            >
+              {dataStatusLabel}
+            </span>
             <span className="text-xs font-mono text-[var(--app-muted)]">
               {time.toLocaleTimeString("zh-CN")}
             </span>
@@ -301,27 +391,41 @@ export default function MarketView({ selectedStock, onSelectStock }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-sm lg:col-span-2">
+      <div className="grid grid-cols-1 gap-4">
+        <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-sm">
           <div className="flex items-center gap-2 overflow-x-auto border-b border-[var(--app-border)] px-4 pb-2 pt-3 scrollbar-hide">
-            {loading ? (
+            {rankLoading && stockRank.length === 0 ? (
               <span className="text-xs font-mono text-[var(--app-muted)]">
                 加载排行数据...
               </span>
             ) : (
-              stockRank.map((stock, index) => (
-                <button
-                  key={stock.code}
-                  onClick={() => onSelectStock(stock.code)}
-                  className={`whitespace-nowrap rounded-lg px-3 py-1 text-xs font-mono transition-colors ${
-                    selectedStock === stock.code
-                      ? "border border-[#16A34A]/40 bg-[#16A34A]/10 text-[#16A34A]"
-                      : "border border-[var(--app-border)] text-[var(--app-muted)] hover:border-[#16A34A]/30 hover:text-[var(--app-text)]"
-                  }`}
-                >
-                  {index + 1}. {getStockDisplayName(stock)}
-                </button>
-              ))
+              stockRank.map((stock, index) => {
+                const stockCode = normalizeStockCode(stock);
+                const displayName =
+                  getStockDisplayName(stock) || getStockSymbol(stock) || stockCode;
+                const isSelected =
+                  Boolean(stockCode) && stockCode === selectedStockCode;
+
+                return (
+                  <button
+                    key={stockCode || getStockSymbol(stock) || index}
+                    type="button"
+                    onClick={() => {
+                      if (stockCode) {
+                        onSelectStock(stockCode);
+                      }
+                    }}
+                    disabled={!stockCode}
+                    className={`whitespace-nowrap rounded-lg px-3 py-1 text-xs font-mono transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                      isSelected
+                        ? "border border-[#16A34A]/40 bg-[#16A34A]/10 text-[#16A34A]"
+                        : "border border-[var(--app-border)] text-[var(--app-muted)] hover:border-[#16A34A]/30 hover:text-[var(--app-text)]"
+                    }`}
+                  >
+                    {index + 1}. {displayName}
+                  </button>
+                );
+              })
             )}
           </div>
 
@@ -331,16 +435,16 @@ export default function MarketView({ selectedStock, onSelectStock }) {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xl font-bold text-[var(--app-text)]">
-                      {getStockDisplayName(quote)}
+                      {quoteDisplayName}
                     </span>
                     <span className="text-sm font-mono text-[var(--app-muted)]">
-                      {quote.symbol}
+                      {quoteSymbol}
                     </span>
                   </div>
 
                   <div className="mt-1 flex flex-wrap items-center gap-3">
                     <span className="font-mono text-3xl font-bold text-[var(--app-text)]">
-                      {quote.price}
+                      {safeText(quote.price)}
                     </span>
                     <span
                       className={`font-mono text-lg font-semibold ${
@@ -365,28 +469,84 @@ export default function MarketView({ selectedStock, onSelectStock }) {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5">
-                  {MARKET_PERIODS.map((currentPeriod) => (
-                    <button
-                      key={currentPeriod}
-                      onClick={() => setPeriod(currentPeriod)}
-                      className={`rounded-lg px-2.5 py-1 text-xs font-mono transition-colors ${
-                        period === currentPeriod
-                          ? "border border-[#16A34A] bg-[#16A34A]/10 text-[#16A34A]"
-                          : "border border-[var(--app-border)] text-[var(--app-muted)] hover:border-[#16A34A] hover:text-[#16A34A]"
-                      }`}
-                    >
-                      {currentPeriod}
-                    </button>
-                  ))}
+                <div
+                  className={`rounded-lg border border-[var(--app-border)] px-2.5 py-1 text-xs font-mono ${
+                    quoteSource === "live" ||
+                    quoteSource === "sina" ||
+                    quoteSource === "alpha_vantage"
+                      ? "text-[#16A34A]"
+                      : "text-[var(--app-muted)]"
+                  }`}
+                >
+                  {quoteStatusLabel}
+                  {quoteTradeTimeLabel ? ` ${quoteTradeTimeLabel}` : ""}
                 </div>
               </div>
 
-              <div className="h-48 px-5 pb-2">
-                <MiniChart
-                  points={kline}
-                  positive={isPositive(quote.changePercent)}
-                />
+              <div className="grid min-h-40 grid-cols-1 gap-3 px-5 pb-5 sm:grid-cols-2">
+                <button
+                  onClick={() => void handleHistoryAnalysis()}
+                  disabled={historyLoading}
+                  className="flex min-h-20 items-center justify-center gap-2 rounded-lg border border-[#16A34A]/30 bg-[#16A34A]/10 px-4 py-3 font-mono text-sm font-semibold text-[#15803D] transition-colors hover:border-[#16A34A] hover:bg-[#16A34A]/15 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {historyLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <BarChart3 className="h-4 w-4" />
+                  )}
+                  {historyLoading ? "分析中..." : "历史行情分析"}
+                </button>
+
+                <button
+                  onClick={openStockAssistant}
+                  className="flex min-h-20 items-center justify-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-4 py-3 font-mono text-sm font-semibold text-[var(--app-text)] transition-colors hover:border-[#16A34A]/40 hover:text-[#15803D]"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  AI投资建议
+                </button>
+
+                {actionError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-mono text-red-600 sm:col-span-2">
+                    {actionError}
+                  </div>
+                ) : null}
+
+                {historyAnalysis ? (
+                  <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-3 sm:col-span-2">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <span className="text-xs font-mono font-semibold text-[var(--app-text)]">
+                        近一年历史行情分析
+                      </span>
+                      <span className="text-xs font-mono text-[var(--app-muted)]">
+                        {historyAnalysis.startDate} - {historyAnalysis.endDate}
+                      </span>
+                    </div>
+                    <p className="text-xs font-mono leading-relaxed text-[var(--app-text)]">
+                      {historyAnalysis.summary}
+                    </p>
+                    <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+                      {[
+                        ["涨跌幅", `${historyAnalysis.returnPercent}%`],
+                        ["最大回撤", `${historyAnalysis.maxDrawdownPercent}%`],
+                        ["趋势", historyAnalysis.trend],
+                        ["风险", historyAnalysis.riskLevel],
+                      ].map(([label, value]) => (
+                        <div
+                          key={label}
+                          className="rounded border border-[var(--app-border)] px-2 py-1.5"
+                        >
+                          <div className="text-xs font-mono text-[var(--app-muted)]">
+                            {label}
+                          </div>
+                          <div className="mt-1 text-xs font-mono font-semibold text-[var(--app-text)]">
+                            {value}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
               </div>
 
               <div className="grid grid-cols-2 border-t border-[var(--app-border)] sm:grid-cols-4">
@@ -411,52 +571,13 @@ export default function MarketView({ selectedStock, onSelectStock }) {
                 ))}
               </div>
             </>
+          ) : quoteLoading ? (
+            <div className="px-5 py-8 text-xs font-mono text-[var(--app-muted)]">
+              加载个股行情...
+            </div>
           ) : null}
         </div>
 
-        <div className="space-y-4">
-          <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--app-text)]">
-                智能分析
-              </h3>
-              <span className="animate-pulse text-xs font-mono text-[#16A34A]">
-                实时
-              </span>
-            </div>
-
-            <div className="space-y-3">
-              {MARKET_AI_INSIGHTS.map((insight) => (
-                <div
-                  key={insight.label}
-                  className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-3"
-                >
-                  <div className="mb-2 text-xs font-mono text-[#16A34A]">
-                    {insight.label}
-                  </div>
-
-                  {insight.accent ? (
-                    <div className="flex items-center gap-2">
-                      <div className="h-2 flex-1 rounded-full bg-[var(--app-soft)]">
-                        <div
-                          className="h-2 rounded-full bg-gradient-to-r from-red-500 via-amber-400 to-[#16A34A]"
-                          style={{ width: insight.accent }}
-                        />
-                      </div>
-                      <span className="text-xs font-mono text-[var(--app-text)]">
-                        {insight.value}
-                      </span>
-                    </div>
-                  ) : (
-                    <p className="text-xs font-mono leading-relaxed text-[var(--app-text)]">
-                      {insight.value}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
       </div>
 
       <div className="flex flex-col gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3 shadow-sm md:flex-row md:items-center md:justify-between">

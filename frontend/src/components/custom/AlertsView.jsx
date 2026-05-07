@@ -9,8 +9,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { alertsApi } from "@/lib/api";
-import { CORE_STOCK_OPTIONS, findStockOption } from "@/constants/stocks";
+import { alertsApi, portfolioApi } from "@/lib/api";
 import { EmptyState, LoadingState } from "@/components/custom/async-state";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 const CONDITION_LABELS = {
@@ -36,6 +35,7 @@ const EMPTY_FORM = {
 export default function AlertsView() {
   const [alerts, setAlerts] = useState([]);
   const [history, setHistory] = useState([]);
+  const [holdings, setHoldings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -55,30 +55,35 @@ export default function AlertsView() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [alertsResponse, historyResponse] = await Promise.all([
+      await alertsApi.checkAlerts();
+      const [alertsResponse, holdingsResponse] = await Promise.all([
         alertsApi.getAlerts(),
-        alertsApi.getHistory(),
+        portfolioApi.getHoldings(),
       ]);
+      const historyResponse = await alertsApi.getHistory();
       if (alertsResponse.success) {
         setAlerts(alertsResponse.data);
       }
       if (historyResponse.success) {
         setHistory(historyResponse.data);
       }
+      if (holdingsResponse.success) {
+        setHoldings(holdingsResponse.data);
+      }
     } finally {
       setLoading(false);
     }
   };
   const handleStockSelect = (symbol) => {
-    const stock = findStockOption(symbol);
-    if (!stock) {
+    const holding = holdings.find((item) => item.symbol === symbol);
+    if (!holding) {
       setForm((current) => ({ ...current, symbol: "", stockName: "" }));
       return;
     }
     setForm((current) => ({
       ...current,
-      symbol: stock.symbol,
-      stockName: stock.name,
+      symbol: holding.symbol,
+      stockName: holding.name,
     }));
   };
   const handleSubmit = async () => {
@@ -92,6 +97,8 @@ export default function AlertsView() {
       async () => {
         if (editId) {
           const response = await alertsApi.updateAlert(editId, {
+            symbol: form.symbol,
+            stockName: form.stockName,
             conditionType: form.conditionType,
             conditionValue: form.conditionValue,
             notifyApp: form.notifyApp,
@@ -118,7 +125,10 @@ export default function AlertsView() {
       {
         successMessage: editId ? "预警已更新" : "预警已创建",
         errorMessage: editId ? "更新预警失败" : "创建预警失败",
-        onSuccess: resetForm,
+        onSuccess: () => {
+          resetForm();
+          void loadData();
+        },
       },
     );
   };
@@ -135,6 +145,7 @@ export default function AlertsView() {
         setAlerts((current) =>
           current.map((item) => (item.id === alert.id ? response.data : item)),
         );
+        void loadData();
       },
       {
         successMessage: `预警已${nextStatus === "active" ? "启用" : "暂停"}`,
@@ -170,6 +181,11 @@ export default function AlertsView() {
     setEditId(alert.id);
     setShowForm(true);
   };
+  const holdingStockOptions = holdings.filter(
+    (holding, index, allHoldings) =>
+      holding.symbol &&
+      allHoldings.findIndex((item) => item.symbol === holding.symbol) === index,
+  );
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -212,15 +228,25 @@ export default function AlertsView() {
               <select
                 value={form.symbol}
                 onChange={(event) => handleStockSelect(event.target.value)}
+                disabled={holdingStockOptions.length === 0}
                 className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm font-mono text-[var(--app-text)] outline-none transition-colors focus:border-[#16A34A]"
               >
-                <option value="">选择股票</option>
-                {CORE_STOCK_OPTIONS.map((stock) => (
-                  <option key={stock.symbol} value={stock.symbol}>
-                    {stock.name} ({stock.symbol})
+                <option value="">
+                  {holdingStockOptions.length === 0
+                    ? "暂无持仓股票"
+                    : "选择持仓股票"}
+                </option>
+                {holdingStockOptions.map((holding) => (
+                  <option key={holding.symbol} value={holding.symbol}>
+                    {holding.name} ({holding.symbol})
                   </option>
                 ))}
               </select>
+              {holdingStockOptions.length === 0 ? (
+                <p className="mt-1 text-xs text-[var(--app-muted)]">
+                  请先在持仓管理中添加持仓，再创建预警。
+                </p>
+              ) : null}
             </div>
 
             <div>

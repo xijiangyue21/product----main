@@ -23,6 +23,13 @@ import org.springframework.stereotype.Service;
 @Service
 public class AliyunMarketApiService {
 
+    private static final String QUOTE_ENDPOINT_PATH = "/finance/a-shares-price";
+    private static final String RANK_ENDPOINT_PATH = "/finance/a-shares-ranking";
+    private static final String KLINE_ENDPOINT_PATH = "/finance/a-shares-kline";
+    private static final String LEGACY_QUOTE_PATH = "/stock/a/price";
+    private static final String LEGACY_RANK_PATH = "/stock/a/rank";
+    private static final String LEGACY_KLINE_PATH = "/stock/a/kline";
+
     private final Environment environment;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -31,12 +38,12 @@ public class AliyunMarketApiService {
         this.environment = environment;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
+                .connectTimeout(Duration.ofSeconds(3))
                 .build();
     }
 
     public Optional<Map<String, Object>> fetchAshareQuote(String code, Map<String, Object> fallbackStock) {
-        return requestJson("/stock/a/price", Map.of("symbol", toProviderSymbol(code)))
+        return requestJson(QUOTE_ENDPOINT_PATH, LEGACY_QUOTE_PATH, Map.of("symbol", toProviderSymbol(code)))
                 .map(root -> unwrapPayload(root))
                 .filter(payload -> payload != null && !payload.isMissingNode() && !payload.isNull())
                 .map(payload -> normalizeQuote(code, payload, fallbackStock));
@@ -62,7 +69,7 @@ public class AliyunMarketApiService {
         payload.put("pageNo", "1");
         payload.put("pageSize", String.valueOf(pageSize));
 
-        Optional<JsonNode> response = requestJson("/stock/a/rank", payload);
+        Optional<JsonNode> response = requestJson(RANK_ENDPOINT_PATH, LEGACY_RANK_PATH, payload);
         if (response.isEmpty()) {
             return Optional.empty();
         }
@@ -88,9 +95,9 @@ public class AliyunMarketApiService {
         Map<String, String> payload = new LinkedHashMap<>();
         payload.put("symbol", toProviderSymbol(code));
         payload.put("type", "240");
-        payload.put("pageSize", "60");
+        payload.put("pageSize", "365");
 
-        Optional<JsonNode> response = requestJson("/stock/a/kline", payload);
+        Optional<JsonNode> response = requestJson(KLINE_ENDPOINT_PATH, LEGACY_KLINE_PATH, payload);
         if (response.isEmpty()) {
             return Optional.empty();
         }
@@ -128,24 +135,21 @@ public class AliyunMarketApiService {
         return normalized.replaceAll("\\D", "");
     }
 
-    private Optional<JsonNode> requestJson(String path, Map<String, String> data) {
-        String endpoint = firstNonBlank(
-                environment.getProperty("MARKET_API_BASE_URL"),
-                environment.getProperty("ALIYUN_API_ENDPOINT")
-        );
+    private Optional<JsonNode> requestJson(String endpointPath, String legacyPath, Map<String, String> data) {
+        Optional<String> endpoint = resolveEndpoint(endpointPath, legacyPath);
         String appCode = firstNonBlank(
                 environment.getProperty("MARKET_API_APP_CODE"),
                 environment.getProperty("ALIYUN_API_APP_CODE")
         );
 
-        if (isBlank(endpoint) || isBlank(appCode)) {
+        if (endpoint.isEmpty() || isBlank(appCode)) {
             return Optional.empty();
         }
 
         try {
             String formBody = encodeForm(data);
-            HttpRequest request = HttpRequest.newBuilder(URI.create(resolveUrl(endpoint, path)))
-                    .timeout(Duration.ofSeconds(15))
+            HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint.get()))
+                    .timeout(Duration.ofSeconds(4))
                     .header("Authorization", "APPCODE " + appCode)
                     .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
                     .POST(HttpRequest.BodyPublishers.ofString(formBody))
@@ -165,6 +169,40 @@ public class AliyunMarketApiService {
         }
     }
 
+    private Optional<String> resolveEndpoint(String endpointPath, String legacyPath) {
+        String configuredEndpoint = normalizedEndpoint(environment.getProperty("MARKET_API_BASE_URL"));
+        if (!isBlank(configuredEndpoint)) {
+            return deriveFinanceEndpoint(configuredEndpoint, endpointPath);
+        }
+
+        String legacyBase = normalizedEndpoint(environment.getProperty("ALIYUN_API_ENDPOINT"));
+        if (!isBlank(legacyBase)) {
+            return Optional.of(resolveUrl(legacyBase, legacyPath));
+        }
+
+        return Optional.empty();
+    }
+
+    private Optional<String> deriveFinanceEndpoint(String configuredEndpoint, String endpointPath) {
+        try {
+            URI configuredUri = URI.create(configuredEndpoint);
+            String scheme = configuredUri.getScheme();
+            String authority = configuredUri.getAuthority();
+            if (isBlank(scheme) || isBlank(authority)) {
+                return Optional.empty();
+            }
+
+            String currentPath = configuredUri.getPath();
+            if (endpointPath.equals(currentPath)) {
+                return Optional.of(configuredEndpoint);
+            }
+
+            return Optional.of(scheme + "://" + authority + endpointPath);
+        } catch (IllegalArgumentException ex) {
+            return Optional.empty();
+        }
+    }
+
     private String resolveUrl(String endpoint, String path) {
         if (isBlank(path)) {
             return endpoint;
@@ -179,6 +217,20 @@ public class AliyunMarketApiService {
             return endpoint + "/" + path;
         }
         return endpoint + path;
+    }
+
+    private String normalizedEndpoint(String endpoint) {
+        if (isBlank(endpoint)) {
+            return "";
+        }
+        String trimmed = endpoint.trim();
+        if (trimmed.contains("your-gateway")) {
+            return "";
+        }
+        if (trimmed.endsWith("/")) {
+            return trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed;
     }
 
     private String encodeForm(Map<String, String> data) {
@@ -249,6 +301,7 @@ public class AliyunMarketApiService {
         }
 
         Map<String, Object> quote = new LinkedHashMap<>();
+        quote.put("code", normalizeCode(code));
         quote.put("symbol", normalizeDisplaySymbol(symbol, code));
         quote.put("name", name);
         quote.put("price", format(price));
@@ -262,6 +315,8 @@ public class AliyunMarketApiService {
         quote.put("pb", firstText(payload, "pb", "pbRatio", "sjl"));
         quote.put("roe", firstText(payload, "roe"));
         quote.put("revenueGrowth", firstText(payload, "revenueGrowth", "yysrzzl"));
+        quote.put("source", "live");
+        quote.put("updatedAt", System.currentTimeMillis());
         quote.put("orderBook", Map.of(
                 "asks", fallbackOrderBook(price, 1),
                 "bids", fallbackOrderBook(price, -1)
@@ -460,10 +515,10 @@ public class AliyunMarketApiService {
             return normalized.toLowerCase(Locale.ROOT);
         }
         if (normalized.length() == 6) {
-            String prefix = normalized.substring(0, 3);
-            if (prefix.startsWith("8") || prefix.startsWith("4")) {
+            if (isBeijingExchangeCode(normalized)) {
                 return "bj" + normalized;
             }
+            String prefix = normalized.substring(0, 3);
             if (List.of("000", "001", "002", "003", "300", "301").contains(prefix)) {
                 return "sz" + normalized;
             }
@@ -498,14 +553,24 @@ public class AliyunMarketApiService {
         if (!code.matches("\\d{6}")) {
             return "SH";
         }
+        if (isBeijingExchangeCode(code)) {
+            return "BJ";
+        }
         String prefix = code.substring(0, 3);
         if (List.of("000", "001", "002", "003", "300", "301").contains(prefix)) {
             return "SZ";
         }
-        if (prefix.startsWith("8") || prefix.startsWith("4")) {
-            return "BJ";
-        }
         return "SH";
+    }
+
+    private boolean isBeijingExchangeCode(String code) {
+        return code.matches("\\d{6}")
+                && (
+                code.startsWith("8")
+                        || code.startsWith("4")
+                        || code.startsWith("92")
+                        || code.startsWith("43")
+        );
     }
 
     private double firstFiniteNumber(JsonNode node, String... keys) {
