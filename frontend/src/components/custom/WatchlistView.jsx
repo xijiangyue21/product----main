@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Search, Star, Trash2, X } from "lucide-react";
 import { marketApi, watchlistApi } from "@/lib/api";
-import { filterStockOptions, getStockPriceSummary } from "@/constants/stocks";
+import { getStockPriceSummary } from "@/constants/stocks";
 import { EmptyState, LoadingState } from "@/components/custom/async-state";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
+import {
+  STOCK_SEARCH_DEBOUNCE_MS,
+  createFallbackSearchResults,
+  isStockCodeQuery,
+  mergeSearchResults,
+} from "@/lib/stockSearch";
 export default function WatchlistView() {
   const [groups, setGroups] = useState([]);
   const [items, setItems] = useState([]);
@@ -13,7 +19,11 @@ export default function WatchlistView() {
   const [showAddItem, setShowAddItem] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchNotice, setSearchNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const latestSearchIdRef = useRef(0);
   const groupAction = useAsyncAction();
   const itemAction = useAsyncAction();
   const loadData = useCallback(async () => {
@@ -45,6 +55,77 @@ export default function WatchlistView() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+  useEffect(() => {
+    const trimmedQuery = searchQuery.trim();
+
+    if (!showAddItem || !trimmedQuery) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchNotice("");
+      return undefined;
+    }
+
+    if (!isStockCodeQuery(trimmedQuery)) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchNotice("");
+      return undefined;
+    }
+
+    const timer = window.setTimeout(async () => {
+      const searchId = latestSearchIdRef.current + 1;
+      latestSearchIdRef.current = searchId;
+      setSearchNotice("");
+
+      const fallbackResults = createFallbackSearchResults(trimmedQuery);
+      setSearchResults(fallbackResults);
+      setSearchLoading(fallbackResults.length === 0);
+
+      try {
+        const response = await marketApi.searchStocks(trimmedQuery);
+
+        if (searchId !== latestSearchIdRef.current) {
+          return;
+        }
+
+        if (response.success) {
+          const apiResults = Array.isArray(response.data) ? response.data : [];
+          const mergedResults = mergeSearchResults(apiResults, fallbackResults);
+
+          setSearchResults(mergedResults);
+          setSearchNotice(
+            apiResults.length === 0 && fallbackResults.length > 0
+              ? "已显示本地匹配结果"
+              : "",
+          );
+        } else {
+          setSearchResults(fallbackResults);
+          setSearchNotice(
+            fallbackResults.length > 0
+              ? "实时搜索暂不可用，已显示本地匹配结果"
+              : response.message || "搜索暂不可用，请稍后重试",
+          );
+        }
+      } catch {
+        if (searchId !== latestSearchIdRef.current) {
+          return;
+        }
+
+        setSearchResults(fallbackResults);
+        setSearchNotice(
+          fallbackResults.length > 0
+            ? "实时搜索暂不可用，已显示本地匹配结果"
+            : "搜索暂不可用，请稍后重试",
+        );
+      } finally {
+        if (searchId === latestSearchIdRef.current) {
+          setSearchLoading(false);
+        }
+      }
+    }, STOCK_SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [searchQuery, showAddItem]);
   const handleCreateGroup = async () => {
     const trimmedName = newGroupName.trim();
     if (!trimmedName) {
@@ -112,6 +193,8 @@ export default function WatchlistView() {
         setItems((current) => [...current, response.data]);
         setShowAddItem(false);
         setSearchQuery("");
+        setSearchResults([]);
+        setSearchNotice("");
       },
       {
         successMessage: `${name} 已加入自选`,
@@ -134,8 +217,13 @@ export default function WatchlistView() {
       },
     );
   };
+  const closeAddItem = () => {
+    setShowAddItem(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchNotice("");
+  };
   const groupItems = items.filter((item) => item.groupId === selectedGroup);
-  const filteredStocks = filterStockOptions(searchQuery);
   const selectedGroupName =
     groups.find((group) => group.id === selectedGroup)?.name ?? "自选股";
   return (
@@ -261,35 +349,63 @@ export default function WatchlistView() {
                   type="text"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="搜索股票代码或名称"
+                  placeholder="搜索股票代码"
                   className="flex-1 bg-transparent text-sm font-mono text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)]"
                   autoFocus
                 />
                 <button
-                  onClick={() => setShowAddItem(false)}
+                  onClick={closeAddItem}
                   className="text-[var(--app-muted)] transition-colors hover:text-[var(--app-text)]"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
               <div className="max-h-48 space-y-1 overflow-y-auto">
-                {filteredStocks.map((stock) => (
-                  <div
-                    key={stock.code}
-                    onClick={() => void handleAddItem(stock.symbol, stock.name)}
-                    className="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 transition-colors hover:bg-[var(--app-soft-hover)]"
-                  >
-                    <div>
-                      <span className="text-sm font-mono font-semibold text-[var(--app-text)]">
-                        {stock.name}
-                      </span>
-                      <span className="ml-2 text-xs font-mono text-[var(--app-muted)]">
-                        {stock.symbol}
-                      </span>
-                    </div>
-                    <Plus className="h-4 w-4 text-[#16A34A]" />
+                {searchLoading ? (
+                  <div className="px-3 py-3 text-xs font-mono text-[var(--app-muted)]">
+                    搜索中...
                   </div>
-                ))}
+                ) : (
+                  <>
+                    {searchNotice ? (
+                      <div className="px-3 py-2 text-xs font-mono text-amber-600 dark:text-amber-400">
+                        {searchNotice}
+                      </div>
+                    ) : null}
+
+                    {searchQuery.trim() ? (
+                      searchResults.length > 0 ? (
+                        searchResults.map((stock) => (
+                          <button
+                            key={stock.code}
+                            onClick={() =>
+                              void handleAddItem(stock.symbol, stock.name)
+                            }
+                            className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--app-soft-hover)]"
+                          >
+                            <div>
+                              <span className="text-sm font-mono font-semibold text-[var(--app-text)]">
+                                {stock.name}
+                              </span>
+                              <span className="ml-2 text-xs font-mono text-[var(--app-muted)]">
+                                {stock.symbol}
+                              </span>
+                            </div>
+                            <Plus className="h-4 w-4 text-[#16A34A]" />
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-3 py-3 text-xs font-mono text-[var(--app-muted)]">
+                          没有找到匹配的股票代码
+                        </div>
+                      )
+                    ) : (
+                      <div className="px-3 py-3 text-xs font-mono text-[var(--app-muted)]">
+                        输入股票代码后搜索
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           ) : null}

@@ -12,7 +12,7 @@ import { alertsApi, authApi, feedbackApi, watchlistApi } from "@/lib/api";
 import { useAuth } from "@/contexts/useAuth";
 import { LoadingState } from "@/components/custom/async-state";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
-import { applyTheme } from "@/lib/theme";
+import { applyTheme, getStoredTheme } from "@/lib/theme";
 import {
   getStoredRefreshRate,
   setStoredRefreshRate,
@@ -34,7 +34,7 @@ export default function ProfileView() {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
-  const [theme, setTheme] = useState("light");
+  const [theme, setTheme] = useState(() => getStoredTheme());
   const [refreshRate, setRefreshRate] = useState(() =>
     String(getStoredRefreshRate()),
   );
@@ -46,6 +46,7 @@ export default function ProfileView() {
   const settingsAction = useAsyncAction();
   const exportAction = useAsyncAction();
   const themeTouchedRef = useRef(false);
+  const refreshRateTouchedRef = useRef(false);
 
   useEffect(() => {
     void loadProfileData();
@@ -62,16 +63,19 @@ export default function ProfileView() {
       if (meResponse.success) {
         setUser(meResponse.data);
 
-        const nextTheme = meResponse.data.theme || "light";
-        setTheme(nextTheme);
-
+        const nextTheme = meResponse.data.theme || getStoredTheme();
         if (!themeTouchedRef.current) {
+          setTheme(nextTheme);
           applyTheme(nextTheme);
         }
 
-        const nextRefreshRate = String(meResponse.data.refreshRate ?? 3);
-        setRefreshRate(nextRefreshRate);
-        setStoredRefreshRate(nextRefreshRate);
+        const nextRefreshRate = String(
+          meResponse.data.refreshRate ?? getStoredRefreshRate(),
+        );
+        if (!refreshRateTouchedRef.current) {
+          setRefreshRate(nextRefreshRate);
+          setStoredRefreshRate(nextRefreshRate);
+        }
       }
 
       if (watchlistResponse.success) {
@@ -175,6 +179,41 @@ export default function ProfileView() {
       {
         successMessage: "主题已切换",
         errorMessage: "保存主题失败",
+      },
+    );
+  };
+
+  const handleRefreshRateChange = async (nextRefreshRate) => {
+    const currentTheme = getStoredTheme();
+    refreshRateTouchedRef.current = true;
+    setRefreshRate(nextRefreshRate);
+    setStoredRefreshRate(nextRefreshRate);
+
+    await settingsAction.run(
+      async () => {
+        const response = await authApi.updatePreferences({
+          theme: currentTheme,
+          refreshRate: Number(nextRefreshRate),
+        });
+
+        if (!response.success) {
+          throw new Error(response.message || "保存刷新频率失败");
+        }
+
+        const savedTheme = response.data.theme || currentTheme;
+        const savedRefreshRate = String(
+          response.data.refreshRate ?? nextRefreshRate,
+        );
+
+        setUser(response.data);
+        setTheme(savedTheme);
+        setRefreshRate(savedRefreshRate);
+        applyTheme(savedTheme);
+        setStoredRefreshRate(savedRefreshRate);
+      },
+      {
+        successMessage: "刷新频率已保存",
+        errorMessage: "保存刷新频率失败",
       },
     );
   };
@@ -287,7 +326,9 @@ export default function ProfileView() {
                 </label>
                 <select
                   value={refreshRate}
-                  onChange={(event) => setRefreshRate(event.target.value)}
+                  onChange={(event) => {
+                    void handleRefreshRateChange(event.target.value);
+                  }}
                   className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-1.5 font-mono text-xs text-[var(--app-text)] outline-none transition-colors focus:border-[#16A34A]"
                 >
                   {REFRESH_OPTIONS.map((option) => (

@@ -12,6 +12,12 @@ export const CORE_STOCK_OPTIONS = [
     aliases: ["宁王", "电池", "CATL"],
   },
   {
+    code: "000686",
+    symbol: "000686.SZ",
+    name: "东北证券",
+    aliases: ["券商", "证券", "Northeast Securities"],
+  },
+  {
     code: "600036",
     symbol: "600036.SH",
     name: "招商银行",
@@ -40,6 +46,12 @@ export const CORE_STOCK_OPTIONS = [
     symbol: "300059.SZ",
     name: "东方财富",
     aliases: ["东财", "券商", "East Money"],
+  },
+  {
+    code: "688699",
+    symbol: "688699.SH",
+    name: "明微电子",
+    aliases: ["明微", "显示驱动", "集成电路", "Mingwei"],
   },
 ];
 

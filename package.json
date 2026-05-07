@@ -5,7 +5,7 @@
   "description": "Java backend + JavaScript frontend workspace",
   "scripts": {
     "dev": "powershell -ExecutionPolicy Bypass -File .\\run-dev.ps1",
-    "backend:dev": "cd backend-java && mvn spring-boot:run",
+    "backend:dev": "powershell -ExecutionPolicy Bypass -File .\\backend-java\\run-backend.ps1",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
     "frontend:lint": "npm --prefix frontend run lint"

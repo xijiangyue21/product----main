@@ -1,6 +1,12 @@
 server:
   port: ${PORT:3000}
 
+logging:
+  level:
+    root: INFO
+    org.springframework.web: INFO
+    org.hibernate.SQL: INFO
+
 spring:
   config:
     import:
@@ -9,7 +15,11 @@ spring:
   jackson:
     serialization:
       write-dates-as-timestamps: false
+  sql:
+    init:
+      mode: always
   jpa:
+    database-platform: org.hibernate.dialect.MySQLDialect
     hibernate:
       ddl-auto: none
       naming:
@@ -19,7 +29,7 @@ spring:
     properties:
       hibernate:
         format_sql: false
-        globally_quoted_identifiers: true
+        globally_quoted_identifiers: false
   datasource:
     hikari:
       maximum-pool-size: 10

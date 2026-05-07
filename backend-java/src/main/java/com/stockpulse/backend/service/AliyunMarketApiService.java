@@ -38,7 +38,7 @@ public class AliyunMarketApiService {
         this.environment = environment;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
+                .connectTimeout(Duration.ofSeconds(3))
                 .build();
     }
 
@@ -95,7 +95,7 @@ public class AliyunMarketApiService {
         Map<String, String> payload = new LinkedHashMap<>();
         payload.put("symbol", toProviderSymbol(code));
         payload.put("type", "240");
-        payload.put("pageSize", "60");
+        payload.put("pageSize", "365");
 
         Optional<JsonNode> response = requestJson(KLINE_ENDPOINT_PATH, LEGACY_KLINE_PATH, payload);
         if (response.isEmpty()) {
@@ -149,7 +149,7 @@ public class AliyunMarketApiService {
         try {
             String formBody = encodeForm(data);
             HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint.get()))
-                    .timeout(Duration.ofSeconds(15))
+                    .timeout(Duration.ofSeconds(4))
                     .header("Authorization", "APPCODE " + appCode)
                     .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
                     .POST(HttpRequest.BodyPublishers.ofString(formBody))
@@ -301,6 +301,7 @@ public class AliyunMarketApiService {
         }
 
         Map<String, Object> quote = new LinkedHashMap<>();
+        quote.put("code", normalizeCode(code));
         quote.put("symbol", normalizeDisplaySymbol(symbol, code));
         quote.put("name", name);
         quote.put("price", format(price));
@@ -314,6 +315,8 @@ public class AliyunMarketApiService {
         quote.put("pb", firstText(payload, "pb", "pbRatio", "sjl"));
         quote.put("roe", firstText(payload, "roe"));
         quote.put("revenueGrowth", firstText(payload, "revenueGrowth", "yysrzzl"));
+        quote.put("source", "live");
+        quote.put("updatedAt", System.currentTimeMillis());
         quote.put("orderBook", Map.of(
                 "asks", fallbackOrderBook(price, 1),
                 "bids", fallbackOrderBook(price, -1)

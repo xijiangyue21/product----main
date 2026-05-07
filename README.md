@@ -33,7 +33,7 @@ StockPulse 是一个前后端分离的股票信息与个人投资管理系统，
 - Spring Boot 3.3
 - Spring Security
 - Spring Data JPA
-- PostgreSQL
+- MySQL
 - AWS S3 Presigner
 
 ## 目录结构
@@ -74,9 +74,9 @@ StockPulse 是一个前后端分离的股票信息与个人投资管理系统，
 建议先准备好以下环境：
 
 - JDK 21
-- Maven，并确保 `mvn` 已加入 PATH
+- Maven，并确保 `mvn` 已加入 PATH，或配置了 `MAVEN_HOME` / `M2_HOME`
 - Node.js 与 npm
-- PostgreSQL 数据库
+- MySQL 数据库
 - Windows PowerShell
 
 根目录的一键启动脚本 `run-dev.ps1` 是 PowerShell 脚本，默认面向 Windows 环境。
@@ -92,20 +92,19 @@ Copy-Item .env.example .env
 最小可运行配置如下：
 
 ```env
-DATABASE_URL=postgresql://username:password@host:5432/dbname?sslmode=require
-DB_SSL=require
+DATABASE_URL=mysql://username:password@host:3306/stockpulse?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
 JWT_SECRET=replace-with-a-long-random-secret
 PORT=3000
 ```
 
 ### 必填变量
 
-- `DATABASE_URL`：后端启动必填，格式为 PostgreSQL URI，不是 JDBC URL
+- `DATABASE_URL`：后端启动必填，推荐格式为 MySQL URI，例如 `mysql://user:password@localhost:3306/stockpulse`
 - `JWT_SECRET`：JWT 签名密钥，生产环境务必替换
 
 ### 常用可选变量
 
-- `DB_SSL`：本地无 SSL 可设为 `disable`
+- `DB_USERNAME` / `DB_PASSWORD`：当 `DATABASE_URL` 使用 `jdbc:mysql://...` 且未在 URL 中携带账号密码时使用
 - `CORS_ORIGINS`：额外允许的前端来源，多个值用逗号分隔
 - `MARKET_API_BASE_URL` / `MARKET_API_APP_CODE`
 - `ALIYUN_API_ENDPOINT` / `ALIYUN_API_APP_CODE`
@@ -120,8 +119,7 @@ PORT=3000
 
 ### 说明
 
-- 当前 Java 后端真正读取的行情配置是 `MARKET_API_BASE_URL` + `MARKET_API_APP_CODE`，或者兼容旧变量 `ALIYUN_API_ENDPOINT` + `ALIYUN_API_APP_CODE`
-- `.env.example` 中保留了一些历史预留字段，例如 `MARKET_API_KEY`、`MARKET_API_SECRET`、`MARKET_API_APP_ID`、`ALIYUN_API_APP_KEY`、`ALIYUN_API_APP_SECRET`，当前 Java 实现并未使用
+- 当前 Java 后端真正读取的行情配置是 `MARKET_API_BASE_URL` + `MARKET_API_APP_CODE`，也兼容旧变量 `ALIYUN_API_ENDPOINT` + `ALIYUN_API_APP_CODE`
 - 前端默认从 `frontend/.env.development` 读取 `VITE_API_URL=http://localhost:3000`
 
 ## 数据库说明
@@ -129,18 +127,21 @@ PORT=3000
 项目当前不会自动建表：
 
 - `spring.jpa.hibernate.ddl-auto=none`
-- `hibernate.globally_quoted_identifiers=true`
+- `hibernate.globally_quoted_identifiers=false`
 
-这意味着你需要先准备好数据库表结构，再启动后端。由于实体表名使用了带大写字母的名称，手动建表时应使用与实体一致的精确表名：
+这意味着你需要先准备好数据库表结构，再启动后端。实体表名仍使用与 Java 实体一致的名称：
 
-- `"Users"`
-- `"PortfolioHoldings"`
-- `"WatchlistGroups"`
-- `"WatchlistItems"`
-- `"Alerts"`
-- `"AlertHistory"`
-- `"Feedbacks"`
-- `"Uploads"`
+- `Users`
+- `PortfolioHoldings`
+- `WatchlistGroups`
+- `WatchlistItems`
+- `Alerts`
+- `AlertHistory`
+- `AiAdviceRecords`
+- `Feedbacks`
+- `Uploads`
+
+其中 `AiAdviceRecords` 会通过 `backend-java/src/main/resources/schema.sql` 使用 MySQL 语法的 `CREATE TABLE IF NOT EXISTS` 自动补齐，用于保存登录用户的 AI 投资建议记录。
 
 如果数据库没有导入这些表，应用可能能启动，但注册、持仓、自选股、预警等接口会在运行时报错。
 
@@ -165,7 +166,7 @@ npm run dev
 - 后端：`mvn spring-boot:run`
 - 前端：`npm run dev`
 
-脚本内部会把后端端口固定到 `3002`，并把前端运行时 `VITE_API_URL` 注入为 `http://localhost:3002`。这样不会受 `frontend/.env.development` 默认值 `3000` 的影响。
+脚本会读取根目录 `.env` 中的 `PORT`，并把前端运行时 `VITE_API_URL` 注入为同一个地址，避免前后端端口不一致。
 
 ### 方式 2：只启动后端
 
@@ -194,7 +195,7 @@ npm run dev
 如果你的后端不在 `3000` 端口启动，需要在前端启动前覆盖接口地址：
 
 ```powershell
-$env:VITE_API_URL="http://localhost:3002"
+$env:VITE_API_URL="http://localhost:3000"
 npm run dev
 ```
 
@@ -253,12 +254,12 @@ node .\test-login.js
 
 注意：
 
-- 该脚本默认请求 `http://localhost:3000/api/auth/login`
-- 如果你使用的是根目录一键启动脚本，后端实际端口是 `3002`，需要自行调整脚本或改为单独启动后端
+- 该脚本默认请求 `http://localhost:${PORT || 3000}/api/auth/login`
+- 如果你修改了根目录 `.env` 里的 `PORT`，可设置 `$env:API_BASE_URL="http://localhost:<PORT>"` 后再运行
 
 ## 常见问题
 
-- 提示 `Global Maven was not found`：说明系统里没有可用的 `mvn`，安装 Maven 后重新打开终端
+- 提示找不到 Maven：确认 `mvn` 在 PATH 中，或已正确配置 `MAVEN_HOME` / `M2_HOME`
 - 提示 `DATABASE_URL is required`：说明根目录 `.env` 未配置或为空
 - 前端能打开但业务接口全报错：通常是数据库表结构还没准备好
 - 上传接口返回 503：通常是 AWS S3 相关配置未填写

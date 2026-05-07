@@ -20,6 +20,7 @@ backend-java/target/
 # Logs and OS
 *.log
 npm-debug.log*
+.codex-logs/
 .DS_Store
 Thumbs.db
 

@@ -1,11 +1,14 @@
 package com.stockpulse.backend.controller;
 
 import com.stockpulse.backend.api.ApiResponse;
+import com.stockpulse.backend.security.AuthenticatedUser;
 import com.stockpulse.backend.service.MarketService;
 import java.util.List;
 import java.util.Map;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,6 +31,11 @@ public class MarketController {
     @GetMapping("/quote/{code}")
     public ApiResponse<Map<String, Object>> quote(@PathVariable String code) {
         return ApiResponse.success(marketService.quote(code));
+    }
+
+    @GetMapping("/live-quote/{code}")
+    public ApiResponse<Map<String, Object>> liveQuote(@PathVariable String code) {
+        return ApiResponse.success(marketService.liveQuote(code));
     }
 
     @GetMapping("/stocks")
@@ -58,6 +66,31 @@ public class MarketController {
     @GetMapping("/kline/{code}")
     public ApiResponse<List<Map<String, Object>>> kline(@PathVariable String code) {
         return ApiResponse.success(marketService.kLine(code));
+    }
+
+    @GetMapping("/history-analysis/{code}")
+    public ApiResponse<Map<String, Object>> historyAnalysis(@PathVariable String code) {
+        return ApiResponse.success(marketService.historyAnalysis(code));
+    }
+
+    @GetMapping("/ai-context/{code}")
+    public ApiResponse<Map<String, Object>> aiContext(@PathVariable String code) {
+        return ApiResponse.success(marketService.aiContext(code));
+    }
+
+    @PostMapping("/ai-speculation/{code}")
+    public ApiResponse<Map<String, Object>> aiSpeculation(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable String code
+    ) {
+        return ApiResponse.success(marketService.aiSpeculation(principal.id(), code));
+    }
+
+    @GetMapping("/ai-speculation/records")
+    public ApiResponse<List<Map<String, Object>>> aiSpeculationRecords(
+            @AuthenticationPrincipal AuthenticatedUser principal
+    ) {
+        return ApiResponse.success(marketService.aiAdviceRecords(principal.id()));
     }
 
     @GetMapping("/stock-rank")

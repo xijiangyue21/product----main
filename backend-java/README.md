@@ -33,11 +33,12 @@ This starts:
 The backend reads the same root `.env` values:
 
 - `DATABASE_URL`
-- `DB_SSL`
+- `DB_USERNAME` / `DB_PASSWORD` when using a `jdbc:mysql://` URL without embedded credentials
 - `JWT_SECRET`
 - `PORT`
 
 ## Notes
 
 - The backend port is controlled by `application.yml`
+- The active database driver is MySQL Connector/J
 - The frontend now targets this backend directly

@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Edit2, PieChart, Plus, Trash2, X } from "lucide-react";
+import { Edit2, PieChart, Plus, Search, Trash2, X } from "lucide-react";
 import { marketApi, portfolioApi } from "@/lib/api";
-import { CORE_STOCK_OPTIONS, findStockOption } from "@/constants/stocks";
 import { EmptyState, LoadingState } from "@/components/custom/async-state";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
+import {
+  STOCK_SEARCH_DEBOUNCE_MS,
+  createFallbackSearchResults,
+  isStockCodeQuery,
+  mergeSearchResults,
+} from "@/lib/stockSearch";
 const COLORS = [
   "#16A34A",
   "#0EA5E9",
@@ -31,16 +36,103 @@ export default function PortfolioView() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [stockSearchQuery, setStockSearchQuery] = useState("");
+  const [stockSearchResults, setStockSearchResults] = useState([]);
+  const [stockSearchLoading, setStockSearchLoading] = useState(false);
+  const [stockSearchNotice, setStockSearchNotice] = useState("");
   const latestQuoteRequestIdRef = useRef(0);
+  const latestStockSearchIdRef = useRef(0);
   const submitAction = useAsyncAction();
   const deleteAction = useAsyncAction();
   useEffect(() => {
     void loadHoldings();
   }, []);
+  useEffect(() => {
+    const trimmedQuery = stockSearchQuery.trim();
+    const selectedCode = form.symbol.split(".")[0] ?? "";
+    const selectedSymbol = form.symbol.toUpperCase();
+    const normalizedQuery = trimmedQuery.toUpperCase();
+
+    if (
+      !showForm ||
+      !trimmedQuery ||
+      (form.symbol &&
+        (normalizedQuery === selectedCode || normalizedQuery === selectedSymbol))
+    ) {
+      setStockSearchResults([]);
+      setStockSearchLoading(false);
+      setStockSearchNotice("");
+      return undefined;
+    }
+
+    if (!isStockCodeQuery(trimmedQuery)) {
+      setStockSearchResults([]);
+      setStockSearchLoading(false);
+      setStockSearchNotice("");
+      return undefined;
+    }
+
+    const timer = window.setTimeout(async () => {
+      const searchId = latestStockSearchIdRef.current + 1;
+      latestStockSearchIdRef.current = searchId;
+      setStockSearchNotice("");
+
+      const fallbackResults = createFallbackSearchResults(trimmedQuery);
+      setStockSearchResults(fallbackResults);
+      setStockSearchLoading(fallbackResults.length === 0);
+
+      try {
+        const response = await marketApi.searchStocks(trimmedQuery);
+
+        if (searchId !== latestStockSearchIdRef.current) {
+          return;
+        }
+
+        if (response.success) {
+          const apiResults = Array.isArray(response.data) ? response.data : [];
+          const mergedResults = mergeSearchResults(apiResults, fallbackResults);
+
+          setStockSearchResults(mergedResults);
+          setStockSearchNotice(
+            apiResults.length === 0 && fallbackResults.length > 0
+              ? "已显示本地匹配结果"
+              : "",
+          );
+        } else {
+          setStockSearchResults(fallbackResults);
+          setStockSearchNotice(
+            fallbackResults.length > 0
+              ? "实时搜索暂不可用，已显示本地匹配结果"
+              : response.message || "搜索暂不可用，请稍后重试",
+          );
+        }
+      } catch {
+        if (searchId !== latestStockSearchIdRef.current) {
+          return;
+        }
+
+        setStockSearchResults(fallbackResults);
+        setStockSearchNotice(
+          fallbackResults.length > 0
+            ? "实时搜索暂不可用，已显示本地匹配结果"
+            : "搜索暂不可用，请稍后重试",
+        );
+      } finally {
+        if (searchId === latestStockSearchIdRef.current) {
+          setStockSearchLoading(false);
+        }
+      }
+    }, STOCK_SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [form.symbol, showForm, stockSearchQuery]);
   const resetForm = () => {
     setShowForm(false);
     setEditId(null);
     setForm(EMPTY_FORM);
+    setStockSearchQuery("");
+    setStockSearchResults([]);
+    setStockSearchNotice("");
   };
   const loadHoldings = async () => {
     setLoading(true);
@@ -53,8 +145,7 @@ export default function PortfolioView() {
       setLoading(false);
     }
   };
-  const handleStockSelect = async (symbol) => {
-    const stock = findStockOption(symbol);
+  const handleStockSelect = async (stock) => {
     if (!stock) {
       setForm((current) => ({
         ...current,
@@ -64,6 +155,9 @@ export default function PortfolioView() {
       }));
       return;
     }
+    setStockSearchQuery(stock.code);
+    setStockSearchResults([]);
+    setStockSearchNotice("");
     setForm((current) => ({
       ...current,
       symbol: stock.symbol,
@@ -140,6 +234,9 @@ export default function PortfolioView() {
       costPrice: holding.costPrice,
       currentPrice: holding.currentPrice,
     });
+    setStockSearchQuery(holding.symbol.split(".")[0] ?? holding.symbol);
+    setStockSearchResults([]);
+    setStockSearchNotice("");
     setEditId(holding.id);
     setShowForm(true);
   };
@@ -184,6 +281,9 @@ export default function PortfolioView() {
             setShowForm(true);
             setEditId(null);
             setForm(EMPTY_FORM);
+            setStockSearchQuery("");
+            setStockSearchResults([]);
+            setStockSearchNotice("");
           }}
           className="flex items-center gap-1.5 rounded-lg bg-[#16A34A] px-3 py-1.5 text-xs font-mono font-semibold text-white transition-colors hover:bg-[#15803D]"
         >
@@ -248,18 +348,78 @@ export default function PortfolioView() {
               <label className="mb-1 block text-xs font-mono text-[var(--app-muted)]">
                 股票
               </label>
-              <select
-                value={form.symbol}
-                onChange={(event) => void handleStockSelect(event.target.value)}
-                className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm font-mono text-[var(--app-text)] outline-none transition-colors focus:border-[#16A34A]"
-              >
-                <option value="">选择股票</option>
-                {CORE_STOCK_OPTIONS.map((stock) => (
-                  <option key={stock.code} value={stock.symbol}>
-                    {stock.name} ({stock.symbol})
-                  </option>
-                ))}
-              </select>
+              <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)]">
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <Search className="h-4 w-4 text-[var(--app-muted)]" />
+                  <input
+                    type="text"
+                    value={stockSearchQuery}
+                    onChange={(event) => {
+                      setStockSearchQuery(event.target.value);
+                      setForm((current) => ({
+                        ...current,
+                        symbol: "",
+                        name: "",
+                        currentPrice: "",
+                      }));
+                    }}
+                    placeholder="搜索股票代码"
+                    className="w-full bg-transparent text-sm font-mono text-[var(--app-text)] outline-none placeholder:text-[var(--app-muted)]"
+                  />
+                </div>
+
+                {form.symbol ? (
+                  <div className="border-t border-[var(--app-border)] px-3 py-2 text-xs font-mono text-[var(--app-muted)]">
+                    已选择：{form.name} · {form.symbol}
+                  </div>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto border-t border-[var(--app-border)]">
+                    {stockSearchLoading ? (
+                      <div className="px-3 py-3 text-xs font-mono text-[var(--app-muted)]">
+                        搜索中...
+                      </div>
+                    ) : (
+                      <>
+                        {stockSearchNotice ? (
+                          <div className="px-3 py-2 text-xs font-mono text-amber-600 dark:text-amber-400">
+                            {stockSearchNotice}
+                          </div>
+                        ) : null}
+
+                        {stockSearchQuery.trim() ? (
+                          stockSearchResults.length > 0 ? (
+                            stockSearchResults.map((stock) => (
+                              <button
+                                key={stock.code}
+                                onClick={() => void handleStockSelect(stock)}
+                                className="flex w-full items-center justify-between px-3 py-2 text-left transition-colors hover:bg-[var(--app-soft-hover)]"
+                              >
+                                <div>
+                                  <span className="text-sm font-mono font-semibold text-[var(--app-text)]">
+                                    {stock.name}
+                                  </span>
+                                  <span className="ml-2 text-xs font-mono text-[var(--app-muted)]">
+                                    {stock.symbol}
+                                  </span>
+                                </div>
+                                <Plus className="h-4 w-4 text-[#16A34A]" />
+                              </button>
+                            ))
+                          ) : (
+                            <div className="px-3 py-3 text-xs font-mono text-[var(--app-muted)]">
+                              没有找到匹配的股票代码
+                            </div>
+                          )
+                        ) : (
+                          <div className="px-3 py-3 text-xs font-mono text-[var(--app-muted)]">
+                            输入股票代码后搜索
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>

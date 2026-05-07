@@ -19,7 +19,12 @@ import AlertsView from "@/components/custom/AlertsView";
 import NewsView from "@/components/custom/NewsView";
 import ProfileView from "@/components/custom/ProfileView";
 import { marketApi } from "@/lib/api";
-import { filterStockOptions } from "@/constants/stocks";
+import {
+  STOCK_SEARCH_DEBOUNCE_MS,
+  createFallbackSearchResults,
+  isStockCodeQuery,
+  mergeSearchResults,
+} from "@/lib/stockSearch";
 
 const NAV_ITEMS = [
   { key: "market", label: "行情", icon: TrendingUp },
@@ -29,41 +34,6 @@ const NAV_ITEMS = [
   { key: "news", label: "资讯", icon: Newspaper },
   { key: "profile", label: "我的", icon: User },
 ];
-
-const SEARCH_DEBOUNCE_MS = 250;
-
-function normalizeSearchResult(item) {
-  return {
-    code: item.code,
-    symbol: item.symbol,
-    name: item.name,
-    price: item.price,
-    source: item.source ?? (item.price ? "live" : "fallback"),
-  };
-}
-
-function mergeSearchResults(primaryResults, fallbackResults) {
-  const mergedResults = [];
-  const seenCodes = new Set();
-
-  for (const item of [...primaryResults, ...fallbackResults]) {
-    if (!item?.code || seenCodes.has(item.code)) {
-      continue;
-    }
-
-    seenCodes.add(item.code);
-    mergedResults.push(normalizeSearchResult(item));
-  }
-
-  return mergedResults;
-}
-
-function createFallbackSearchResults(query) {
-  return filterStockOptions(query).map((item) => ({
-    ...item,
-    source: "fallback",
-  }));
-}
 
 function SearchBox({
   value,
@@ -75,7 +45,7 @@ function SearchBox({
   onFocus,
   onKeyDown,
   onSelect,
-  placeholder = "搜索代码或股票名称",
+  placeholder = "搜索股票代码",
   className = "",
 }) {
   return (
@@ -168,6 +138,13 @@ export default function Index() {
       return;
     }
 
+    if (!isStockCodeQuery(trimmedQuery)) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchNotice("");
+      return;
+    }
+
     const timer = window.setTimeout(async () => {
       const searchId = latestSearchIdRef.current + 1;
       latestSearchIdRef.current = searchId;
@@ -175,6 +152,8 @@ export default function Index() {
       setSearchNotice("");
 
       const fallbackResults = createFallbackSearchResults(trimmedQuery);
+      setSearchResults(fallbackResults);
+      setSearchLoading(fallbackResults.length === 0);
 
       try {
         const response = await marketApi.searchStocks(trimmedQuery);
@@ -217,7 +196,7 @@ export default function Index() {
           setSearchLoading(false);
         }
       }
-    }, SEARCH_DEBOUNCE_MS);
+    }, STOCK_SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
   }, [searchQuery]);

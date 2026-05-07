@@ -87,6 +87,11 @@ public class AlertsController {
         return ApiResponse.success(alertsService.history(principal.id()));
     }
 
+    @PostMapping("/check")
+    public ApiResponse<List<Map<String, Object>>> check(@AuthenticationPrincipal AuthenticatedUser principal) {
+        return ApiResponse.success(alertsService.check(principal.id()));
+    }
+
     public record AlertRequest(
             @NotBlank(message = "Symbol is required") String symbol,
             @NotBlank(message = "Stock name is required") String stockName,
